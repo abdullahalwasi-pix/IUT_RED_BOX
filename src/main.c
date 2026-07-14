@@ -8,7 +8,11 @@ int main(void)
     InitWindow(screenWidth, screenHeight, "IUT Red Box");
     SetTargetFPS(60);
 
-    /* Player texture load */
+    /* Background texture */
+    Texture2D mainGateBackground =
+        LoadTexture("../assets/backgrounds/main_gate.png");
+
+    /* Player textures */
     Texture2D idleTexture =
         LoadTexture("../assets/player/idle.png");
 
@@ -22,12 +26,18 @@ int main(void)
         LoadTexture("../assets/player/sword.png");
 
     /* Texture validation */
-    if (!IsTextureValid(idleTexture) ||
+    if (!IsTextureValid(mainGateBackground) ||
+        !IsTextureValid(idleTexture) ||
         !IsTextureValid(runTexture) ||
         !IsTextureValid(jumpTexture) ||
         !IsTextureValid(swordTexture))
     {
-        TraceLog(LOG_ERROR, "Player texture load failed.");
+        TraceLog(LOG_ERROR, "One or more textures failed to load.");
+
+        if (IsTextureValid(mainGateBackground))
+        {
+            UnloadTexture(mainGateBackground);
+        }
 
         if (IsTextureValid(idleTexture))
         {
@@ -53,13 +63,33 @@ int main(void)
         return 1;
     }
 
-    /* Animation frame সংখ্যা */
+    /* Background rectangles */
+    Rectangle backgroundSource = {
+        0.0f,
+        0.0f,
+        (float)mainGateBackground.width,
+        (float)mainGateBackground.height
+    };
+
+    Rectangle backgroundDestination = {
+        0.0f,
+        0.0f,
+        (float)screenWidth,
+        (float)screenHeight
+    };
+
+    Vector2 backgroundOrigin = {
+        0.0f,
+        0.0f
+    };
+
+    /* Animation frame counts */
     const int idleFrames = 8;
     const int runFrames = 8;
     const int jumpFrames = 6;
     const int swordFrames = 8;
 
-    /* Frame size */
+    /* Frame dimensions */
     float idleFrameWidth =
         (float)idleTexture.width / idleFrames;
 
@@ -84,7 +114,7 @@ int main(void)
     float swordFrameHeight =
         (float)swordTexture.height;
 
-    /* Animation variables */
+    /* Animation state */
     int currentFrame = 0;
     float frameTimer = 0.0f;
 
@@ -94,14 +124,7 @@ int main(void)
         100.0f
     };
 
-    /*
-     * Movement speed
-     *
-     * সাধারণ দৌড়: 220
-     * Sprint: 340
-     * সাধারণ air movement: 330
-     * Sprint jump momentum: 390
-     */
+    /* Movement speeds */
     float groundSpeed = 220.0f;
     float sprintSpeed = 340.0f;
 
@@ -113,8 +136,11 @@ int main(void)
     float jumpForce = -800.0f;
     float gravity = 2000.0f;
 
-    /* Ground */
-    float groundY = 420.0f;
+    /*
+     * এই মানটি background-এর road অনুযায়ী
+     * পরে সামান্য পরিবর্তন করা যাবে।
+     */
+    float groundY = 530.0f;
 
     /* Player states */
     bool isRunning = false;
@@ -126,12 +152,7 @@ int main(void)
     bool isJumping = false;
     bool wasJumping = false;
 
-    /*
-     * Sprint অবস্থায় jump শুরু হয়েছিল কি না।
-     * Jump-এর মাঝখানে Shift ছেড়ে দিলেও momentum থাকবে।
-     */
     bool isSprintJump = false;
-
     bool isAttacking = false;
     bool facingRight = true;
 
@@ -158,9 +179,7 @@ int main(void)
         isRunning = false;
         isSprinting = false;
 
-        /*
-         * Shift key-এর যেকোনোটি ব্যবহার করা যাবে।
-         */
+        /* Input states */
         bool shiftDown =
             IsKeyDown(KEY_LEFT_SHIFT) ||
             IsKeyDown(KEY_RIGHT_SHIFT);
@@ -174,15 +193,13 @@ int main(void)
         bool movementKeyDown =
             moveRight || moveLeft;
 
-        /* F1 দিয়ে hitbox দেখা বা লুকানো */
+        /* Debug hitbox toggle */
         if (IsKeyPressed(KEY_F1))
         {
             showAttackHitbox = !showAttackHitbox;
         }
 
-        /*
-         * Ground attack।
-         */
+        /* Ground attack */
         if (IsKeyPressed(KEY_SPACE) &&
             !isAttacking &&
             !isJumping)
@@ -195,17 +212,11 @@ int main(void)
             attackLungeApplied = false;
         }
 
-        /*
-         * Jump শুরু।
-         */
+        /* Jump */
         if (IsKeyPressed(KEY_UP) &&
             !isJumping &&
             !isAttacking)
         {
-            /*
-             * Jump শুরু করার মুহূর্তে Shift এবং
-             * movement key চাপা থাকলে Sprint Jump।
-             */
             isSprintJump =
                 shiftDown &&
                 movementKeyDown;
@@ -217,21 +228,15 @@ int main(void)
             frameTimer = 0.0f;
         }
 
-        /*
-         * বর্তমান horizontal speed নির্বাচন।
-         */
+        /* Select movement speed */
         float horizontalSpeed;
 
         if (isJumping)
         {
-            if (isSprintJump)
-            {
-                horizontalSpeed = sprintAirSpeed;
-            }
-            else
-            {
-                horizontalSpeed = airSpeed;
-            }
+            horizontalSpeed =
+                isSprintJump ?
+                sprintAirSpeed :
+                airSpeed;
         }
         else
         {
@@ -246,9 +251,7 @@ int main(void)
             }
         }
 
-        /*
-         * Attack চলাকালে movement বন্ধ।
-         */
+        /* Movement is locked while attacking */
         if (!isAttacking)
         {
             if (moveRight)
@@ -270,18 +273,12 @@ int main(void)
             }
         }
 
-        /*
-         * বাতাসে Sprint state দেখানো হবে না।
-         * সেখানে Jump state-ই প্রধান।
-         */
         if (isJumping)
         {
             isSprinting = false;
         }
 
-        /*
-         * Variable jump height।
-         */
+        /* Variable jump height */
         if (isJumping &&
             IsKeyReleased(KEY_UP) &&
             verticalVelocity < -200.0f)
@@ -289,9 +286,7 @@ int main(void)
             verticalVelocity *= 0.55f;
         }
 
-        /*
-         * Gravity।
-         */
+        /* Gravity */
         if (isJumping)
         {
             verticalVelocity +=
@@ -301,9 +296,7 @@ int main(void)
                 verticalVelocity * deltaTime;
         }
 
-        /*
-         * Camera shake update।
-         */
+        /* Camera shake */
         if (cameraShakeTimer > 0.0f)
         {
             cameraShakeTimer -= deltaTime;
@@ -322,17 +315,13 @@ int main(void)
             };
         }
 
-        /*
-         * Impact flash update।
-         */
+        /* Impact flash */
         if (impactFlashTimer > 0.0f)
         {
             impactFlashTimer -= deltaTime;
         }
 
-        /*
-         * বর্তমান animation state।
-         */
+        /* Current animation information */
         Texture2D currentTexture;
 
         float currentFrameWidth;
@@ -381,18 +370,10 @@ int main(void)
 
             totalFrames = runFrames;
 
-            /*
-             * Sprint করলে একই run animation
-             * দ্রুত চলবে।
-             */
-            if (isSprinting)
-            {
-                frameDuration = 0.075f;
-            }
-            else
-            {
-                frameDuration = 0.12f;
-            }
+            frameDuration =
+                isSprinting ?
+                0.075f :
+                0.12f;
         }
         else
         {
@@ -416,27 +397,23 @@ int main(void)
         float playerGroundPosition =
             groundY - playerDrawHeight;
 
-        /*
-         * Ground alignment।
-         */
+        /* Ground alignment */
         if (!isJumping)
         {
             playerPosition.y =
                 playerGroundPosition;
         }
 
-        /*
-         * Landing detection।
-         */
+        /* Landing */
         if (isJumping &&
-            playerPosition.y >=
-                playerGroundPosition &&
+            playerPosition.y >= playerGroundPosition &&
             verticalVelocity > 0.0f)
         {
             playerPosition.y =
                 playerGroundPosition;
 
             verticalVelocity = 0.0f;
+
             isJumping = false;
             isSprintJump = false;
 
@@ -444,9 +421,7 @@ int main(void)
             frameTimer = 0.0f;
         }
 
-        /*
-         * State পরিবর্তন হলে animation reset।
-         */
+        /* Animation state change */
         if (!isAttacking &&
             (isJumping != wasJumping ||
              (!isJumping &&
@@ -462,44 +437,26 @@ int main(void)
         wasRunning = isRunning;
         wasSprinting = isSprinting;
 
-        /*
-         * Professional sword attack timing।
-         */
+        /* Sword attack timing */
         if (isAttacking)
         {
             float currentAttackFrameDuration;
 
-            /*
-             * Frame 0–1:
-             * প্রস্তুতি।
-             */
             if (currentFrame <= 1)
             {
                 currentAttackFrameDuration =
                     0.09f;
             }
-            /*
-             * Frame 2–3:
-             * দ্রুত swing।
-             */
             else if (currentFrame <= 3)
             {
                 currentAttackFrameDuration =
                     0.055f;
             }
-            /*
-             * Frame 4:
-             * Impact।
-             */
             else if (currentFrame == 4)
             {
                 currentAttackFrameDuration =
                     0.14f;
             }
-            /*
-             * Frame 5–7:
-             * Recovery।
-             */
             else
             {
                 currentAttackFrameDuration =
@@ -514,9 +471,7 @@ int main(void)
                 frameTimer = 0.0f;
                 currentFrame++;
 
-                /*
-                 * Attack lunge।
-                 */
+                /* Attack lunge */
                 if (currentFrame == 3 &&
                     !attackLungeApplied)
                 {
@@ -537,18 +492,14 @@ int main(void)
                     attackLungeApplied = true;
                 }
 
-                /*
-                 * Impact effect।
-                 */
+                /* Impact effect */
                 if (currentFrame == 4)
                 {
                     cameraShakeTimer = 0.10f;
                     impactFlashTimer = 0.07f;
                 }
 
-                /*
-                 * Attack শেষ।
-                 */
+                /* Attack finish */
                 if (currentFrame >= swordFrames)
                 {
                     isAttacking = false;
@@ -560,9 +511,7 @@ int main(void)
                 }
             }
         }
-        /*
-         * Jump frame physics অনুযায়ী।
-         */
+        /* Jump animation */
         else if (isJumping)
         {
             if (verticalVelocity < -350.0f)
@@ -590,9 +539,7 @@ int main(void)
                 currentFrame = 5;
             }
         }
-        /*
-         * Idle, run ও sprint animation loop।
-         */
+        /* Idle, run and sprint animation */
         else
         {
             frameTimer += deltaTime;
@@ -609,9 +556,7 @@ int main(void)
             }
         }
 
-        /*
-         * Screen boundary।
-         */
+        /* Screen boundaries */
         if (playerPosition.x < 0.0f)
         {
             playerPosition.x = 0.0f;
@@ -626,9 +571,7 @@ int main(void)
                 playerDrawWidth;
         }
 
-        /*
-         * Source rectangle ও direction flip।
-         */
+        /* Source rectangle and horizontal flip */
         Rectangle sourceRectangle;
 
         if (facingRight)
@@ -659,14 +602,12 @@ int main(void)
             playerDrawHeight
         };
 
-        Vector2 origin = {
+        Vector2 playerOrigin = {
             0.0f,
             0.0f
         };
 
-        /*
-         * Attack hitbox।
-         */
+        /* Attack hitbox */
         bool attackHitboxActive =
             isAttacking &&
             currentFrame >= 3 &&
@@ -698,36 +639,54 @@ int main(void)
 
         BeginDrawing();
 
-        ClearBackground(DARKGRAY);
-
-        BeginMode2D(camera);
+        ClearBackground(BLACK);
 
         /*
-         * পরীক্ষামূলক ground।
+         * Background, effects এবং player—
+         * সব world camera-এর ভেতরে।
          */
-        DrawRectangle(
-            0,
-            (int)groundY,
-            screenWidth,
-            screenHeight - (int)groundY,
-            DARKGREEN
+        BeginMode2D(camera);
+
+        /* Main Gate background */
+        DrawTexturePro(
+            mainGateBackground,
+            backgroundSource,
+            backgroundDestination,
+            backgroundOrigin,
+            0.0f,
+            WHITE
         );
 
         /*
-         * Sprint dust effect।
+         * অদৃশ্য collision ground বোঝার জন্য
+         * F2 চাপলে একটি line দেখা যাবে।
          */
+        if (IsKeyDown(KEY_F2))
+        {
+            DrawLine(
+                0,
+                (int)groundY,
+                screenWidth,
+                (int)groundY,
+                YELLOW
+            );
+        }
+
+        /* Sprint dust */
         if (isSprinting)
         {
             float dustX;
 
             if (facingRight)
             {
-                dustX = playerPosition.x +
+                dustX =
+                    playerPosition.x +
                     playerDrawWidth * 0.20f;
             }
             else
             {
-                dustX = playerPosition.x +
+                dustX =
+                    playerPosition.x +
                     playerDrawWidth * 0.80f;
             }
 
@@ -743,31 +702,27 @@ int main(void)
             );
 
             DrawCircle(
-                (int)(dustX -
-                    (facingRight ? 13.0f : -13.0f)),
+                (int)(
+                    dustX -
+                    (facingRight ?
+                     13.0f :
+                     -13.0f)
+                ),
                 (int)(dustY + 3.0f),
                 6.0f,
                 Fade(LIGHTGRAY, 0.20f)
             );
         }
 
-        /*
-         * Sword slash effect।
-         */
+        /* Sword slash effect */
         if (isAttacking &&
             currentFrame >= 3 &&
             currentFrame <= 5)
         {
-            float direction;
-
-            if (facingRight)
-            {
-                direction = 1.0f;
-            }
-            else
-            {
-                direction = -1.0f;
-            }
+            float direction =
+                facingRight ?
+                1.0f :
+                -1.0f;
 
             Vector2 slashStart = {
                 playerPosition.x +
@@ -816,21 +771,17 @@ int main(void)
             );
         }
 
-        /*
-         * Player draw।
-         */
+        /* Player */
         DrawTexturePro(
             currentTexture,
             sourceRectangle,
             destinationRectangle,
-            origin,
+            playerOrigin,
             0.0f,
             WHITE
         );
 
-        /*
-         * Debug attack hitbox।
-         */
+        /* Debug attack hitbox */
         if (showAttackHitbox &&
             attackHitboxActive)
         {
@@ -848,9 +799,7 @@ int main(void)
 
         EndMode2D();
 
-        /*
-         * Impact flash।
-         */
+        /* Impact flash */
         if (impactFlashTimer > 0.0f)
         {
             DrawRectangle(
@@ -862,47 +811,53 @@ int main(void)
             );
         }
 
+        /* UI */
+        DrawRectangle(
+            0,
+            0,
+            screenWidth,
+            122,
+            Fade(BLACK, 0.50f)
+        );
+
         DrawText(
-            "IUT RED BOX - MOVEMENT AND COMBAT TEST",
-            160,
-            25,
-            27,
+            "IUT RED BOX - MAIN GATE TEST",
+            260,
+            20,
+            28,
             WHITE
         );
 
         DrawText(
             "LEFT/RIGHT = Move   SHIFT = Sprint   UP = Jump",
-            195,
-            65,
+            190,
+            58,
             19,
             LIGHTGRAY
         );
 
         DrawText(
-            "SPACE = Attack   F1 = Show/Hide Hitbox",
-            285,
-            92,
-            18,
+            "SPACE = Attack   F1 = Hitbox   Hold F2 = Ground Line",
+            210,
+            87,
+            17,
             GRAY
         );
 
-        /*
-         * State display।
-         */
         DrawText(
             TextFormat(
                 "State: %s",
                 isAttacking ? "ATTACKING" :
                 isJumping ?
                     (isSprintJump ?
-                        "SPRINT JUMP" :
-                        "JUMPING") :
+                     "SPRINT JUMP" :
+                     "JUMPING") :
                 isSprinting ? "SPRINTING" :
                 isRunning ? "RUNNING" :
                 "IDLE"
             ),
             20,
-            550,
+            560,
             20,
             WHITE
         );
@@ -913,14 +868,11 @@ int main(void)
                 currentFrame
             ),
             430,
-            550,
+            560,
             18,
             LIGHTGRAY
         );
 
-        /*
-         * বর্তমান movement speed।
-         */
         float displayedSpeed;
 
         if (isJumping)
@@ -947,10 +899,10 @@ int main(void)
                 displayedSpeed
             ),
             700,
-            550,
+            560,
             18,
-            isSprinting ||
-            isSprintJump ?
+            (isSprinting ||
+             isSprintJump) ?
                 YELLOW :
                 LIGHTGRAY
         );
@@ -958,9 +910,8 @@ int main(void)
         EndDrawing();
     }
 
-    /*
-     * Texture unload।
-     */
+    /* Texture unload */
+    UnloadTexture(mainGateBackground);
     UnloadTexture(idleTexture);
     UnloadTexture(runTexture);
     UnloadTexture(jumpTexture);
