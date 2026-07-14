@@ -685,8 +685,8 @@ int main(void)
         if (gameState == GAME_VICTORY)
         {
             destinationRectangle.y -=
-                fabsf(sinf(resultTimer * 5.0f)) *
-                14.0f;
+                fabsf(sinf(resultTimer * 4.2f)) *
+                9.0f;
         }
 
         BeginDrawing();
@@ -726,9 +726,15 @@ int main(void)
             DrawRectangleRec(barBack, Fade(BLACK, 0.75f));
             DrawRectangleRec(barFill, LIME);
 
-            if (enemy.state == ENEMY_ATTACKING) {
-                enemy.attackBox = GetEnemyAttackBox(&enemy);
-                DrawRectangleRec(enemy.attackBox, Fade(ORANGE, 0.18f));
+            if (enemy.state == ENEMY_ATTACKING)
+            {
+                /*
+                 * Attack hitbox logic active থাকবে, কিন্তু gameplay-তে
+                 * কোনো square/rectangle দেখা যাবে না।
+                 * শুধু enemy-এর "!" warning থাকবে।
+                 */
+                enemy.attackBox =
+                    GetEnemyAttackBox(&enemy);
             }
         }
 
@@ -786,109 +792,11 @@ int main(void)
             playerTint
         );
 
-        /* -------------------- PLAYER VICTORY CELEBRATION -------------------- */
-
-        if (gameState == GAME_VICTORY)
-        {
-            float bounceY =
-                fabsf(sinf(resultTimer * 5.0f)) *
-                14.0f;
-
-            float pulse =
-                0.5f +
-                0.5f * sinf(resultTimer * 7.0f);
-
-            Vector2 leftShoulder = {
-                playerX +
-                    playerDrawWidth * 0.38f,
-                playerDrawY -
-                    bounceY +
-                    playerDrawHeight * 0.35f
-            };
-
-            Vector2 rightShoulder = {
-                playerX +
-                    playerDrawWidth * 0.62f,
-                playerDrawY -
-                    bounceY +
-                    playerDrawHeight * 0.35f
-            };
-
-            Vector2 leftHand = {
-                leftShoulder.x - 28.0f,
-                leftShoulder.y - 72.0f
-            };
-
-            Vector2 rightHand = {
-                rightShoulder.x + 28.0f,
-                rightShoulder.y - 72.0f
-            };
-
-            /*
-             * Dummy/prototype victory pose:
-             * দুই হাত ওপরে ওঠে। Final victory sprite এলে এই procedural
-             * arms-এর জায়গায় sprite animation বসানো যাবে।
-             */
-            DrawLineEx(
-                leftShoulder,
-                leftHand,
-                15.0f,
-                DARKBLUE
-            );
-
-            DrawLineEx(
-                rightShoulder,
-                rightHand,
-                15.0f,
-                DARKBLUE
-            );
-
-            DrawCircleV(
-                leftHand,
-                8.0f,
-                BEIGE
-            );
-
-            DrawCircleV(
-                rightHand,
-                8.0f,
-                BEIGE
-            );
-
-            /*
-             * ছোট celebration sparks।
-             */
-            DrawCircle(
-                (int)(playerX +
-                    playerDrawWidth * 0.20f),
-                (int)(playerDrawY -
-                    bounceY +
-                    25.0f),
-                3.0f + pulse * 2.0f,
-                GOLD
-            );
-
-            DrawCircle(
-                (int)(playerX +
-                    playerDrawWidth * 0.80f),
-                (int)(playerDrawY -
-                    bounceY +
-                    15.0f),
-                3.0f + (1.0f - pulse) * 2.0f,
-                YELLOW
-            );
-
-            DrawText(
-                "WINNER!",
-                (int)(playerX +
-                    playerDrawWidth * 0.20f),
-                (int)(playerDrawY -
-                    bounceY -
-                    42.0f),
-                22,
-                GOLD
-            );
-        }
+        /*
+         * Victory celebration:
+         * Player sprite শুধু হালকা up-down bounce করবে।
+         * কোনো procedural হাত, circle, spark বা extra drawing নেই।
+         */
 
         if (showHitboxes) {
             DrawRectangleLinesEx(playerBody, 2.0f, GREEN);
@@ -908,7 +816,7 @@ int main(void)
         DrawRectangle(0, 0, SCREEN_WIDTH, 118, Fade(BLACK, 0.68f));
         DrawText(TextFormat("IUT RED BOX  |  LEVEL %d", CURRENT_LEVEL), 24, 16, 28, WHITE);
         DrawText("LEFT/RIGHT Move | SHIFT Sprint | UP Jump | SPACE Attack", 24, 52, 18, LIGHTGRAY);
-        DrawText("F1 Hitboxes | F2 Ground line | R Restart", 24, 80, 17, GRAY);
+        DrawText("F1 Debug hitboxes | F2 Ground line | R Restart", 24, 80, 17, GRAY);
 
         const char *comboText = isSpecialAttack && isAttacking
             ? "COMBO: SPECIAL ATTACK!"
