@@ -94,14 +94,24 @@ int main(void)
         100.0f
     };
 
-    /* Movement */
+    /*
+     * Movement speed
+     *
+     * সাধারণ দৌড়: 220
+     * Sprint: 340
+     * সাধারণ air movement: 330
+     * Sprint jump momentum: 390
+     */
     float groundSpeed = 220.0f;
+    float sprintSpeed = 340.0f;
+
     float airSpeed = 330.0f;
+    float sprintAirSpeed = 390.0f;
 
     /* Jump physics */
     float verticalVelocity = 0.0f;
     float jumpForce = -800.0f;
-float gravity = 2000.0f;
+    float gravity = 2000.0f;
 
     /* Ground */
     float groundY = 420.0f;
@@ -110,15 +120,22 @@ float gravity = 2000.0f;
     bool isRunning = false;
     bool wasRunning = false;
 
+    bool isSprinting = false;
+    bool wasSprinting = false;
+
     bool isJumping = false;
     bool wasJumping = false;
+
+    /*
+     * Sprint অবস্থায় jump শুরু হয়েছিল কি না।
+     * Jump-এর মাঝখানে Shift ছেড়ে দিলেও momentum থাকবে।
+     */
+    bool isSprintJump = false;
 
     bool isAttacking = false;
     bool facingRight = true;
 
-    /*
-     * Attack effect variables
-     */
+    /* Attack effects */
     bool attackLungeApplied = false;
 
     float cameraShakeTimer = 0.0f;
@@ -126,9 +143,7 @@ float gravity = 2000.0f;
 
     bool showAttackHitbox = false;
 
-    /*
-     * Camera শুধু screen shake-এর জন্য।
-     */
+    /* Camera */
     Camera2D camera = {0};
 
     camera.target = (Vector2){0.0f, 0.0f};
@@ -141,17 +156,32 @@ float gravity = 2000.0f;
         float deltaTime = GetFrameTime();
 
         isRunning = false;
+        isSprinting = false;
 
         /*
-         * F1 দিয়ে attack hitbox দেখা বা লুকানো যাবে।
+         * Shift key-এর যেকোনোটি ব্যবহার করা যাবে।
          */
+        bool shiftDown =
+            IsKeyDown(KEY_LEFT_SHIFT) ||
+            IsKeyDown(KEY_RIGHT_SHIFT);
+
+        bool moveRight =
+            IsKeyDown(KEY_RIGHT);
+
+        bool moveLeft =
+            IsKeyDown(KEY_LEFT);
+
+        bool movementKeyDown =
+            moveRight || moveLeft;
+
+        /* F1 দিয়ে hitbox দেখা বা লুকানো */
         if (IsKeyPressed(KEY_F1))
         {
             showAttackHitbox = !showAttackHitbox;
         }
 
         /*
-         * Ground attack শুরু।
+         * Ground attack।
          */
         if (IsKeyPressed(KEY_SPACE) &&
             !isAttacking &&
@@ -166,12 +196,20 @@ float gravity = 2000.0f;
         }
 
         /*
-         * Attack চলার সময় jump করা যাবে না।
+         * Jump শুরু।
          */
         if (IsKeyPressed(KEY_UP) &&
             !isJumping &&
             !isAttacking)
         {
+            /*
+             * Jump শুরু করার মুহূর্তে Shift এবং
+             * movement key চাপা থাকলে Sprint Jump।
+             */
+            isSprintJump =
+                shiftDown &&
+                movementKeyDown;
+
             verticalVelocity = jumpForce;
             isJumping = true;
 
@@ -180,25 +218,40 @@ float gravity = 2000.0f;
         }
 
         /*
-         * Ground ও air movement speed।
+         * বর্তমান horizontal speed নির্বাচন।
          */
         float horizontalSpeed;
 
         if (isJumping)
         {
-            horizontalSpeed = airSpeed;
+            if (isSprintJump)
+            {
+                horizontalSpeed = sprintAirSpeed;
+            }
+            else
+            {
+                horizontalSpeed = airSpeed;
+            }
         }
         else
         {
-            horizontalSpeed = groundSpeed;
+            if (shiftDown && movementKeyDown)
+            {
+                horizontalSpeed = sprintSpeed;
+                isSprinting = true;
+            }
+            else
+            {
+                horizontalSpeed = groundSpeed;
+            }
         }
 
         /*
-         * Attack চলাকালে সাধারণ movement বন্ধ।
+         * Attack চলাকালে movement বন্ধ।
          */
         if (!isAttacking)
         {
-            if (IsKeyDown(KEY_RIGHT))
+            if (moveRight)
             {
                 playerPosition.x +=
                     horizontalSpeed * deltaTime;
@@ -207,7 +260,7 @@ float gravity = 2000.0f;
                 facingRight = true;
             }
 
-            if (IsKeyDown(KEY_LEFT))
+            if (moveLeft)
             {
                 playerPosition.x -=
                     horizontalSpeed * deltaTime;
@@ -215,6 +268,15 @@ float gravity = 2000.0f;
                 isRunning = true;
                 facingRight = false;
             }
+        }
+
+        /*
+         * বাতাসে Sprint state দেখানো হবে না।
+         * সেখানে Jump state-ই প্রধান।
+         */
+        if (isJumping)
+        {
+            isSprinting = false;
         }
 
         /*
@@ -232,14 +294,15 @@ float gravity = 2000.0f;
          */
         if (isJumping)
         {
-            verticalVelocity += gravity * deltaTime;
+            verticalVelocity +=
+                gravity * deltaTime;
 
             playerPosition.y +=
                 verticalVelocity * deltaTime;
         }
 
         /*
-         * Screen shake timer update।
+         * Camera shake update।
          */
         if (cameraShakeTimer > 0.0f)
         {
@@ -260,7 +323,7 @@ float gravity = 2000.0f;
         }
 
         /*
-         * Impact flash timer update।
+         * Impact flash update।
          */
         if (impactFlashTimer > 0.0f)
         {
@@ -268,7 +331,7 @@ float gravity = 2000.0f;
         }
 
         /*
-         * বর্তমান animation state-এর texture ও size।
+         * বর্তমান animation state।
          */
         Texture2D currentTexture;
 
@@ -280,8 +343,8 @@ float gravity = 2000.0f;
         int totalFrames;
 
         /*
-         * State priority:
-         * Attack → Jump → Run → Idle
+         * Priority:
+         * Attack → Jump → Run/Sprint → Idle
          */
         if (isAttacking)
         {
@@ -290,10 +353,6 @@ float gravity = 2000.0f;
             currentFrameWidth = swordFrameWidth;
             currentFrameHeight = swordFrameHeight;
 
-            /*
-             * Sword sprite-এর visual size।
-             * বেশি বড় হলে 0.60f করা যাবে।
-             */
             drawScale = 0.62f;
 
             totalFrames = swordFrames;
@@ -321,7 +380,19 @@ float gravity = 2000.0f;
             drawScale = 0.72f;
 
             totalFrames = runFrames;
-            frameDuration = 0.12f;
+
+            /*
+             * Sprint করলে একই run animation
+             * দ্রুত চলবে।
+             */
+            if (isSprinting)
+            {
+                frameDuration = 0.075f;
+            }
+            else
+            {
+                frameDuration = 0.12f;
+            }
         }
         else
         {
@@ -350,32 +421,38 @@ float gravity = 2000.0f;
          */
         if (!isJumping)
         {
-            playerPosition.y = playerGroundPosition;
+            playerPosition.y =
+                playerGroundPosition;
         }
 
         /*
-         * Landing।
+         * Landing detection।
          */
         if (isJumping &&
-            playerPosition.y >= playerGroundPosition &&
+            playerPosition.y >=
+                playerGroundPosition &&
             verticalVelocity > 0.0f)
         {
-            playerPosition.y = playerGroundPosition;
+            playerPosition.y =
+                playerGroundPosition;
 
             verticalVelocity = 0.0f;
             isJumping = false;
+            isSprintJump = false;
 
             currentFrame = 0;
             frameTimer = 0.0f;
         }
 
         /*
-         * State বদলালে animation reset।
+         * State পরিবর্তন হলে animation reset।
          */
         if (!isAttacking &&
             (isJumping != wasJumping ||
              (!isJumping &&
-              isRunning != wasRunning)))
+              isRunning != wasRunning) ||
+             (!isJumping &&
+              isSprinting != wasSprinting)))
         {
             currentFrame = 0;
             frameTimer = 0.0f;
@@ -383,40 +460,50 @@ float gravity = 2000.0f;
 
         wasJumping = isJumping;
         wasRunning = isRunning;
+        wasSprinting = isSprinting;
 
         /*
          * Professional sword attack timing।
          */
         if (isAttacking)
         {
-            /*
-             * প্রতিটি phase-এর speed আলাদা।
-             *
-             * 0–1 = anticipation
-             * 2–3 = fast swing
-             * 4   = impact
-             * 5–7 = recovery
-             */
             float currentAttackFrameDuration;
 
+            /*
+             * Frame 0–1:
+             * প্রস্তুতি।
+             */
             if (currentFrame <= 1)
             {
-                currentAttackFrameDuration = 0.09f;
+                currentAttackFrameDuration =
+                    0.09f;
             }
+            /*
+             * Frame 2–3:
+             * দ্রুত swing।
+             */
             else if (currentFrame <= 3)
             {
-                currentAttackFrameDuration = 0.055f;
+                currentAttackFrameDuration =
+                    0.055f;
             }
+            /*
+             * Frame 4:
+             * Impact।
+             */
             else if (currentFrame == 4)
             {
-                /*
-                 * Impact frame একটু বেশি সময় থাকবে।
-                 */
-                currentAttackFrameDuration = 0.14f;
+                currentAttackFrameDuration =
+                    0.14f;
             }
+            /*
+             * Frame 5–7:
+             * Recovery।
+             */
             else
             {
-                currentAttackFrameDuration = 0.08f;
+                currentAttackFrameDuration =
+                    0.08f;
             }
 
             frameTimer += deltaTime;
@@ -428,12 +515,13 @@ float gravity = 2000.0f;
                 currentFrame++;
 
                 /*
-                 * Swing শুরু হলে player সামান্য সামনে যাবে।
+                 * Attack lunge।
                  */
                 if (currentFrame == 3 &&
                     !attackLungeApplied)
                 {
-                    float lungeDistance = 24.0f;
+                    float lungeDistance =
+                        24.0f;
 
                     if (facingRight)
                     {
@@ -450,7 +538,7 @@ float gravity = 2000.0f;
                 }
 
                 /*
-                 * Impact frame-এ shake ও flash।
+                 * Impact effect।
                  */
                 if (currentFrame == 4)
                 {
@@ -473,7 +561,7 @@ float gravity = 2000.0f;
             }
         }
         /*
-         * Jump animation physics অনুযায়ী।
+         * Jump frame physics অনুযায়ী।
          */
         else if (isJumping)
         {
@@ -503,7 +591,7 @@ float gravity = 2000.0f;
             }
         }
         /*
-         * Idle ও run animation loop।
+         * Idle, run ও sprint animation loop।
          */
         else
         {
@@ -529,11 +617,13 @@ float gravity = 2000.0f;
             playerPosition.x = 0.0f;
         }
 
-        if (playerPosition.x + playerDrawWidth >
+        if (playerPosition.x +
+                playerDrawWidth >
             screenWidth)
         {
             playerPosition.x =
-                screenWidth - playerDrawWidth;
+                screenWidth -
+                playerDrawWidth;
         }
 
         /*
@@ -544,7 +634,8 @@ float gravity = 2000.0f;
         if (facingRight)
         {
             sourceRectangle = (Rectangle){
-                currentFrame * currentFrameWidth,
+                currentFrame *
+                    currentFrameWidth,
                 0.0f,
                 currentFrameWidth,
                 currentFrameHeight
@@ -575,7 +666,6 @@ float gravity = 2000.0f;
 
         /*
          * Attack hitbox।
-         * Frame 3, 4 ও 5-এ active থাকবে।
          */
         bool attackHitboxActive =
             isAttacking &&
@@ -610,12 +700,11 @@ float gravity = 2000.0f;
 
         ClearBackground(DARKGRAY);
 
-        /*
-         * Camera shake শুধু game world-এ।
-         * UI shake করবে না।
-         */
         BeginMode2D(camera);
 
+        /*
+         * পরীক্ষামূলক ground।
+         */
         DrawRectangle(
             0,
             (int)groundY,
@@ -625,7 +714,45 @@ float gravity = 2000.0f;
         );
 
         /*
-         * Slash trail effect।
+         * Sprint dust effect।
+         */
+        if (isSprinting)
+        {
+            float dustX;
+
+            if (facingRight)
+            {
+                dustX = playerPosition.x +
+                    playerDrawWidth * 0.20f;
+            }
+            else
+            {
+                dustX = playerPosition.x +
+                    playerDrawWidth * 0.80f;
+            }
+
+            float dustY =
+                playerPosition.y +
+                playerDrawHeight * 0.92f;
+
+            DrawCircle(
+                (int)dustX,
+                (int)dustY,
+                9.0f,
+                Fade(LIGHTGRAY, 0.28f)
+            );
+
+            DrawCircle(
+                (int)(dustX -
+                    (facingRight ? 13.0f : -13.0f)),
+                (int)(dustY + 3.0f),
+                6.0f,
+                Fade(LIGHTGRAY, 0.20f)
+            );
+        }
+
+        /*
+         * Sword slash effect।
          */
         if (isAttacking &&
             currentFrame >= 3 &&
@@ -667,9 +794,6 @@ float gravity = 2000.0f;
                 slashStart.y + 30.0f
             };
 
-            /*
-             * তিন স্তরের slash line।
-             */
             DrawLineEx(
                 slashStart,
                 slashEndOuter,
@@ -705,7 +829,7 @@ float gravity = 2000.0f;
         );
 
         /*
-         * F1 চালু থাকলে hitbox দেখা যাবে।
+         * Debug attack hitbox।
          */
         if (showAttackHitbox &&
             attackHitboxActive)
@@ -739,34 +863,41 @@ float gravity = 2000.0f;
         }
 
         DrawText(
-            "IUT RED BOX - PROFESSIONAL COMBAT TEST",
-            175,
+            "IUT RED BOX - MOVEMENT AND COMBAT TEST",
+            160,
             25,
-            28,
+            27,
             WHITE
         );
 
         DrawText(
-            "LEFT/RIGHT = Move   UP = Jump   SPACE = Attack",
-            210,
+            "LEFT/RIGHT = Move   SHIFT = Sprint   UP = Jump",
+            195,
             65,
-            20,
+            19,
             LIGHTGRAY
         );
 
         DrawText(
-            "F1 = Show/Hide Attack Hitbox",
-            340,
-            95,
+            "SPACE = Attack   F1 = Show/Hide Hitbox",
+            285,
+            92,
             18,
             GRAY
         );
 
+        /*
+         * State display।
+         */
         DrawText(
             TextFormat(
                 "State: %s",
                 isAttacking ? "ATTACKING" :
-                isJumping ? "JUMPING" :
+                isJumping ?
+                    (isSprintJump ?
+                        "SPRINT JUMP" :
+                        "JUMPING") :
+                isSprinting ? "SPRINTING" :
                 isRunning ? "RUNNING" :
                 "IDLE"
             ),
@@ -781,23 +912,45 @@ float gravity = 2000.0f;
                 "Frame: %d",
                 currentFrame
             ),
-            450,
+            430,
             550,
             18,
             LIGHTGRAY
         );
 
+        /*
+         * বর্তমান movement speed।
+         */
+        float displayedSpeed;
+
+        if (isJumping)
+        {
+            displayedSpeed =
+                isSprintJump ?
+                sprintAirSpeed :
+                airSpeed;
+        }
+        else if (isSprinting)
+        {
+            displayedSpeed =
+                sprintSpeed;
+        }
+        else
+        {
+            displayedSpeed =
+                groundSpeed;
+        }
+
         DrawText(
             TextFormat(
-                "Hitbox: %s",
-                attackHitboxActive ?
-                    "ACTIVE" :
-                    "INACTIVE"
+                "Speed: %.0f",
+                displayedSpeed
             ),
             700,
             550,
             18,
-            attackHitboxActive ?
+            isSprinting ||
+            isSprintJump ?
                 YELLOW :
                 LIGHTGRAY
         );
@@ -805,6 +958,9 @@ float gravity = 2000.0f;
         EndDrawing();
     }
 
+    /*
+     * Texture unload।
+     */
     UnloadTexture(idleTexture);
     UnloadTexture(runTexture);
     UnloadTexture(jumpTexture);
