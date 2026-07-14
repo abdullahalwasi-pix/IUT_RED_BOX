@@ -115,6 +115,7 @@ static void DamageEnemy(DummyEnemy *enemy, int damage, bool playerIsLeft)
 int main(void)
 {
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "IUT Red Box - Level 1 Dummy Enemy");
+    InitAudioDevice();
     SetTargetFPS(60);
 
     Texture2D background = LoadTexture("../assets/backgrounds/main_gate.png");
@@ -122,6 +123,40 @@ int main(void)
     Texture2D runTexture = LoadTexture("../assets/player/run.png");
     Texture2D jumpTexture = LoadTexture("../assets/player/jump.png");
     Texture2D swordTexture = LoadTexture("../assets/player/sword.png");
+
+    Sound swordSwingSound = LoadSound("../assets/audio/sword_swing.wav");
+    Sound swordHitSound = LoadSound("../assets/audio/sword_hit.wav");
+    Sound playerHitSound = LoadSound("../assets/audio/player_hit.wav");
+    Sound enemyTelegraphSound = LoadSound("../assets/audio/enemy_telegraph.wav");
+    Sound enemyPushSound = LoadSound("../assets/audio/enemy_push.wav");
+    Sound victorySound = LoadSound("../assets/audio/victory.wav");
+    Sound defeatSound = LoadSound("../assets/audio/defeat.wav");
+    Sound level1IntroSound = LoadSound("../assets/audio/level1_intro.wav");
+    Music level1Ambience = LoadMusicStream("../assets/audio/level1_ambience.wav");
+
+    bool swordSwingSoundReady = IsSoundValid(swordSwingSound);
+    bool swordHitSoundReady = IsSoundValid(swordHitSound);
+    bool playerHitSoundReady = IsSoundValid(playerHitSound);
+    bool enemyTelegraphSoundReady = IsSoundValid(enemyTelegraphSound);
+    bool enemyPushSoundReady = IsSoundValid(enemyPushSound);
+    bool victorySoundReady = IsSoundValid(victorySound);
+    bool defeatSoundReady = IsSoundValid(defeatSound);
+    bool level1IntroSoundReady = IsSoundValid(level1IntroSound);
+    bool level1AmbienceReady = IsMusicValid(level1Ambience);
+
+    if (swordSwingSoundReady) SetSoundVolume(swordSwingSound, 0.42f);
+    if (swordHitSoundReady) SetSoundVolume(swordHitSound, 0.62f);
+    if (playerHitSoundReady) SetSoundVolume(playerHitSound, 0.48f);
+    if (enemyTelegraphSoundReady) SetSoundVolume(enemyTelegraphSound, 0.34f);
+    if (enemyPushSoundReady) SetSoundVolume(enemyPushSound, 0.46f);
+    if (victorySoundReady) SetSoundVolume(victorySound, 0.50f);
+    if (defeatSoundReady) SetSoundVolume(defeatSound, 0.50f);
+    if (level1IntroSoundReady) SetSoundVolume(level1IntroSound, 0.52f);
+    if (level1AmbienceReady)
+    {
+        SetMusicVolume(level1Ambience, 0.20f);
+        level1Ambience.looping = true;
+    }
 
     if (!IsTextureValid(background) || !IsTextureValid(idleTexture) ||
         !IsTextureValid(runTexture) || !IsTextureValid(jumpTexture) ||
@@ -132,6 +167,7 @@ int main(void)
         if (IsTextureValid(runTexture)) UnloadTexture(runTexture);
         if (IsTextureValid(jumpTexture)) UnloadTexture(jumpTexture);
         if (IsTextureValid(swordTexture)) UnloadTexture(swordTexture);
+        CloseAudioDevice();
         CloseWindow();
         return 1;
     }
@@ -190,12 +226,42 @@ int main(void)
     GameState gameState = GAME_PLAYING;
     float resultTimer = 0.0f;
     int successfulHits = 0;
+    bool victorySoundPlayed = false;
+    bool defeatSoundPlayed = false;
+
+    float levelIntroTimer = 0.0f;
+    bool ambienceStarted = false;
+
+    if (level1IntroSoundReady)
+    {
+        PlaySound(level1IntroSound);
+    }
 
     Camera2D camera = {0};
     camera.zoom = 1.0f;
 
     while (!WindowShouldClose()) {
         float dt = GetFrameTime();
+
+        if (level1AmbienceReady)
+        {
+            UpdateMusicStream(level1Ambience);
+        }
+
+        if (gameState == GAME_PLAYING && !ambienceStarted)
+        {
+            levelIntroTimer += dt;
+
+            /*
+             * Intro sting শেষ হওয়ার আগেই ambience খুব আস্তে ঢুকে যায়।
+             * এতে abrupt sound change হয় না।
+             */
+            if (levelIntroTimer >= 1.35f && level1AmbienceReady)
+            {
+                PlayMusicStream(level1Ambience);
+                ambienceStarted = true;
+            }
+        }
 
         /*
          * Solid collision resolve করার জন্য আগের X position রাখা হয়।
@@ -244,6 +310,22 @@ int main(void)
             gameState = GAME_PLAYING;
             resultTimer = 0.0f;
             successfulHits = 0;
+            victorySoundPlayed = false;
+            defeatSoundPlayed = false;
+
+            levelIntroTimer = 0.0f;
+            ambienceStarted = false;
+
+            if (level1AmbienceReady)
+            {
+                StopMusicStream(level1Ambience);
+            }
+
+            if (level1IntroSoundReady)
+            {
+                StopSound(level1IntroSound);
+                PlaySound(level1IntroSound);
+            }
         }
 
         if (gameState == GAME_PLAYING && IsKeyPressed(KEY_SPACE) && !isAttacking && !isJumping && playerHealth > 0) {
@@ -265,6 +347,15 @@ int main(void)
             frameTimer = 0.0f;
             attackLungeApplied = false;
             enemyHitThisAttack = false;
+
+            if (swordSwingSoundReady)
+            {
+                SetSoundPitch(
+                    swordSwingSound,
+                    isSpecialAttack ? 0.94f : 1.00f
+                );
+                PlaySound(swordSwingSound);
+            }
         }
 
         if (gameState == GAME_PLAYING && IsKeyPressed(KEY_UP) && !isJumping && !isAttacking && playerHealth > 0) {
@@ -530,6 +621,16 @@ int main(void)
                 enemy.attackBox = GetEnemyAttackBox(&enemy);
                 if (enemy.attackTimer >= enemy.attackWindup &&
                     !enemy.damageApplied) {
+
+                    /*
+                     * Zombie-এর খালি হাতের push/whiff sound attack release-এ
+                     * বাজে, hit হোক বা miss হোক।
+                     */
+                    if (enemyPushSoundReady)
+                    {
+                        PlaySound(enemyPushSound);
+                    }
+
                     if (!playerIsAboveEnemy &&
                         CheckCollisionRecs(enemy.attackBox, playerBody) &&
                         playerInvulnerabilityTimer <= 0.0f &&
@@ -538,6 +639,11 @@ int main(void)
                         if (playerHealth < 0) playerHealth = 0;
                         playerInvulnerabilityTimer = 0.80f;
                         cameraShakeTimer = 0.10f;
+
+                        if (playerHitSoundReady)
+                        {
+                            PlaySound(playerHitSound);
+                        }
                     }
                     enemy.damageApplied = true;
                 }
@@ -555,6 +661,11 @@ int main(void)
                     enemy.state = ENEMY_ATTACKING;
                     enemy.attackTimer = 0.0f;
                     enemy.damageApplied = false;
+
+                    if (enemyTelegraphSoundReady)
+                    {
+                        PlaySound(enemyTelegraphSound);
+                    }
                 } else if (distance <= enemy.detectionRange && distance > enemy.attackRange && playerHealth > 0) {
                     enemy.state = ENEMY_CHASING;
                     enemy.body.x += (enemy.facingRight ? 1.0f : -1.0f) * enemy.moveSpeed * dt;
@@ -576,6 +687,15 @@ int main(void)
                 successfulHits++;
                 enemyHitThisAttack = true;
                 cameraShakeTimer = 0.10f;
+
+                if (swordHitSoundReady)
+                {
+                    SetSoundPitch(
+                        swordHitSound,
+                        isSpecialAttack ? 0.90f : 1.00f
+                    );
+                    PlaySound(swordHitSound);
+                }
             }
 
             if (enemy.body.x < 0.0f) enemy.body.x = 0.0f;
@@ -646,6 +766,17 @@ int main(void)
                 {
                     enemy.state = ENEMY_IDLE;
                 }
+
+                if (level1AmbienceReady)
+                {
+                    StopMusicStream(level1Ambience);
+                }
+
+                if (!defeatSoundPlayed && defeatSoundReady)
+                {
+                    PlaySound(defeatSound);
+                    defeatSoundPlayed = true;
+                }
             }
             else if (!enemy.active)
             {
@@ -655,6 +786,17 @@ int main(void)
                 isAttacking = false;
                 isRunning = false;
                 isSprinting = false;
+
+                if (level1AmbienceReady)
+                {
+                    StopMusicStream(level1Ambience);
+                }
+
+                if (!victorySoundPlayed && victorySoundReady)
+                {
+                    PlaySound(victorySound);
+                    victorySoundPlayed = true;
+                }
             }
         }
         else
@@ -989,6 +1131,18 @@ int main(void)
     UnloadTexture(runTexture);
     UnloadTexture(jumpTexture);
     UnloadTexture(swordTexture);
+
+    if (swordSwingSoundReady) UnloadSound(swordSwingSound);
+    if (swordHitSoundReady) UnloadSound(swordHitSound);
+    if (playerHitSoundReady) UnloadSound(playerHitSound);
+    if (enemyTelegraphSoundReady) UnloadSound(enemyTelegraphSound);
+    if (enemyPushSoundReady) UnloadSound(enemyPushSound);
+    if (victorySoundReady) UnloadSound(victorySound);
+    if (defeatSoundReady) UnloadSound(defeatSound);
+    if (level1IntroSoundReady) UnloadSound(level1IntroSound);
+    if (level1AmbienceReady) UnloadMusicStream(level1Ambience);
+
+    CloseAudioDevice();
     CloseWindow();
     return 0;
 }
