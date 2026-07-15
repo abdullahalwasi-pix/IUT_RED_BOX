@@ -1,7 +1,6 @@
 #include "raylib.h"
 #include <math.h>
 #include <stdbool.h>
-
 #define SCREEN_WIDTH 1000
 #define SCREEN_HEIGHT 600
 #define CURRENT_LEVEL 1
@@ -251,11 +250,7 @@ int main(void)
         if (gameState == GAME_PLAYING && !ambienceStarted)
         {
             levelIntroTimer += dt;
-
-            /*
-             * Intro sting শেষ হওয়ার আগেই ambience খুব আস্তে ঢুকে যায়।
-             * এতে abrupt sound change হয় না।
-             */
+            
             if (levelIntroTimer >= 1.35f && level1AmbienceReady)
             {
                 PlayMusicStream(level1Ambience);
@@ -263,9 +258,6 @@ int main(void)
             }
         }
 
-        /*
-         * Solid collision resolve করার জন্য আগের X position রাখা হয়।
-         */
         float previousPlayerX = playerX;
 
         isRunning = false;
@@ -513,10 +505,6 @@ int main(void)
             playerDrawHeight * 0.77f
         };
 
-        /*
-         * Player যথেষ্ট ওপরে থাকলে enemy তাকে আঘাত করতে পারবে না।
-         * এতে player enemy-এর মাথার ওপর দিয়ে jump করে যেতে পারে।
-         */
         float playerBottomY =
             playerBody.y + playerBody.height;
 
@@ -527,15 +515,6 @@ int main(void)
             playerBottomY <
             enemyTopY + 50.0f;
 
-        /* =====================================================
-           SOLID PLAYER ↔ ENEMY BODY COLLISION
-           ===================================================== */
-
-        /*
-         * Player যদি enemy-এর যথেষ্ট ওপরে থাকে, তবে সে মাথার ওপর দিয়ে
-         * jump করে পার হতে পারবে। অন্যথায় দুই body একে অপরের ভেতর
-         * প্রবেশ করতে পারবে না।
-         */
         if (gameState == GAME_PLAYING &&
             enemy.active &&
             enemy.state != ENEMY_DEAD &&
@@ -622,10 +601,6 @@ int main(void)
                 if (enemy.attackTimer >= enemy.attackWindup &&
                     !enemy.damageApplied) {
 
-                    /*
-                     * Zombie-এর খালি হাতের push/whiff sound attack release-এ
-                     * বাজে, hit হোক বা miss হোক।
-                     */
                     if (enemyPushSoundReady)
                     {
                         PlaySound(enemyPushSound);
@@ -702,12 +677,6 @@ int main(void)
             if (enemy.body.x + enemy.body.width > SCREEN_WIDTH) enemy.body.x = SCREEN_WIDTH - enemy.body.width;
         }
 
-        /* -------------------- ENEMY MOVEMENT COLLISION FIX -------------------- */
-
-        /*
-         * Enemy chase করে player-এর body-এর মধ্যে ঢুকে গেলে enemy-কে
-         * player-এর বাইরের edge-এ থামিয়ে দেওয়া হয়।
-         */
         if (gameState == GAME_PLAYING &&
             enemy.active &&
             enemy.state != ENEMY_DEAD &&
@@ -748,7 +717,6 @@ int main(void)
             }
         }
 
-        /* -------------------- MATCH RESULT -------------------- */
 
         if (gameState == GAME_PLAYING)
         {
@@ -821,9 +789,6 @@ int main(void)
             playerDrawHeight
         };
 
-        /*
-         * Victory হলে player আনন্দে হালকা bounce করবে।
-         */
         if (gameState == GAME_VICTORY)
         {
             destinationRectangle.y -=
@@ -870,11 +835,6 @@ int main(void)
 
             if (enemy.state == ENEMY_ATTACKING)
             {
-                /*
-                 * Attack hitbox logic active থাকবে, কিন্তু gameplay-তে
-                 * কোনো square/rectangle দেখা যাবে না।
-                 * শুধু enemy-এর "!" warning থাকবে।
-                 */
                 enemy.attackBox =
                     GetEnemyAttackBox(&enemy);
             }
@@ -934,11 +894,6 @@ int main(void)
             playerTint
         );
 
-        /*
-         * Victory celebration:
-         * Player sprite শুধু হালকা up-down bounce করবে।
-         * কোনো procedural হাত, circle, spark বা extra drawing নেই।
-         */
 
         if (showHitboxes) {
             DrawRectangleLinesEx(playerBody, 2.0f, GREEN);
@@ -991,7 +946,6 @@ int main(void)
             );
         }
 
-        /* -------------------- PROFESSIONAL RESULT SCREEN -------------------- */
 
         if (gameState != GAME_PLAYING)
         {
