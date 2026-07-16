@@ -11,9 +11,21 @@
 #define PLAYER_SPECIAL_DAMAGE 50
 #define COMBO_REQUIRED_ATTACKS 3
 #define COMBO_RESET_TIME 0.90f
+#define PLAYER_IDLE_SCALE 0.52f
+#define PLAYER_RUN_SCALE 0.72f
+#define PLAYER_JUMP_SCALE 0.52f
+#define PLAYER_ATTACK_SCALE 0.78f
+#define PLAYER_ATTACK_GROUND_OFFSET 70.0f
+#define PLAYER_NORMAL_ATTACK_WIDTH 88.0f
+#define PLAYER_SPECIAL_ATTACK_WIDTH 126.0f
+#define PLAYER_NORMAL_ATTACK_HEIGHT 76.0f
+#define PLAYER_SPECIAL_ATTACK_HEIGHT 94.0f
+#define PLAYER_NORMAL_ATTACK_GAP 26.0f
+#define PLAYER_SPECIAL_ATTACK_GAP 40.0f
+
 
 #define ZOMBIE_BASELINE_RATIO (226.0f / 256.0f)
-#define ZOMBIE_PLAYER_HEIGHT_RATIO 0.59f
+#define ZOMBIE_PLAYER_HEIGHT_RATIO 0.68f
 #define ZOMBIE_GROUND_OFFSET -48.0f
 #define ZOMBIE_IDLE_FRAMES 8
 #define ZOMBIE_WALK_FRAMES 8
@@ -100,14 +112,14 @@ static LevelEnemyConfig GetLevelEnemyConfig(int level)
 {
     switch (level)
     {
-        case 1: return (LevelEnemyConfig){250,  6,  40.0f, 900.0f, 78.0f, 1.80f, 0.60f};
-        case 2: return (LevelEnemyConfig){ 90, 10,  52.0f, 330.0f, 72.0f, 1.45f, 0.50f};
-        case 3: return (LevelEnemyConfig){110, 12,  60.0f, 350.0f, 75.0f, 1.30f, 0.46f};
-        case 4: return (LevelEnemyConfig){130, 14,  68.0f, 380.0f, 78.0f, 1.18f, 0.42f};
-        case 5: return (LevelEnemyConfig){155, 17,  77.0f, 410.0f, 82.0f, 1.05f, 0.38f};
-        case 6: return (LevelEnemyConfig){185, 20,  88.0f, 450.0f, 86.0f, 0.92f, 0.34f};
+        case 1: return (LevelEnemyConfig){250,  6,  40.0f, 900.0f, 17.0f, 1.80f, 0.60f};
+        case 2: return (LevelEnemyConfig){ 90, 10,  52.0f, 330.0f, 17.0f, 1.45f, 0.50f};
+        case 3: return (LevelEnemyConfig){110, 12,  60.0f, 350.0f, 18.0f, 1.30f, 0.46f};
+        case 4: return (LevelEnemyConfig){130, 14,  68.0f, 380.0f, 20.0f, 1.18f, 0.42f};
+        case 5: return (LevelEnemyConfig){155, 17,  77.0f, 410.0f, 22.0f, 1.05f, 0.38f};
+        case 6: return (LevelEnemyConfig){185, 20,  88.0f, 450.0f, 24.0f, 0.92f, 0.34f};
         case 7:
-        default: return (LevelEnemyConfig){225, 24, 100.0f, 500.0f, 90.0f, 0.80f, 0.30f};
+        default: return (LevelEnemyConfig){225, 24, 100.0f, 500.0f, 26.0f, 0.80f, 0.30f};
     }
 }
 
@@ -247,19 +259,19 @@ static ZombieEnemy CreateZombieEnemy(
 
 static Rectangle GetEnemyAttackBox(const ZombieEnemy *enemy)
 {
-    float attackWidth = enemy->body.height * 0.76f;
-    float attackHeight = enemy->body.height * 0.48f;
+    float attackWidth = enemy->body.height * 0.54f;
+    float attackHeight = enemy->body.height * 0.40f;
 
     Rectangle box = {
         0.0f,
-        enemy->body.y + enemy->body.height * 0.25f,
+        enemy->body.y + enemy->body.height * 0.32f,
         attackWidth,
         attackHeight
     };
 
     box.x = enemy->facingRight
-        ? enemy->body.x + enemy->body.width - 3.0f
-        : enemy->body.x - box.width + 3.0f;
+        ? enemy->body.x + enemy->body.width - 1.25f
+        : enemy->body.x - box.width + 1.25f;
 
     return box;
 }
@@ -422,20 +434,12 @@ static void DrawZombieEnemy(
 
     if (enemy->state == ENEMY_ATTACKING && !enemy->damageApplied)
     {
-        float pulse = 0.55f + 0.25f * sinf(enemy->attackTimer * 16.0f);
-        DrawCircleLines(
-            (int)(enemy->body.x + enemy->body.width * 0.5f),
-            (int)(enemy->body.y + 18.0f),
-            17.0f + 3.0f * pulse,
-            Fade(ORANGE, 0.85f)
-        );
-
         DrawText(
             "!",
             (int)(enemy->body.x + enemy->body.width * 0.5f - 4.0f),
             (int)(enemy->body.y - 16.0f),
             24,
-            ORANGE
+            RED
         );
     }
 
@@ -883,7 +887,7 @@ int main(void)
             currentTexture = swordTexture;
             currentFrameWidth = swordFrameWidth;
             currentFrameHeight = (float)swordTexture.height;
-            drawScale = 0.62f;
+            drawScale = PLAYER_ATTACK_SCALE;
             totalFrames = swordFrames;
             frameDuration = 0.08f;
         }
@@ -892,7 +896,7 @@ int main(void)
             currentTexture = jumpTexture;
             currentFrameWidth = jumpFrameWidth;
             currentFrameHeight = (float)jumpTexture.height;
-            drawScale = 0.52f;
+            drawScale = PLAYER_JUMP_SCALE;
             totalFrames = jumpFrames;
             frameDuration = 0.10f;
         }
@@ -901,7 +905,7 @@ int main(void)
             currentTexture = runTexture;
             currentFrameWidth = runFrameWidth;
             currentFrameHeight = (float)runTexture.height;
-            drawScale = 0.72f;
+            drawScale = PLAYER_RUN_SCALE;
             totalFrames = runFrames;
             frameDuration = isSprinting ? 0.075f : 0.12f;
         }
@@ -910,14 +914,14 @@ int main(void)
             currentTexture = idleTexture;
             currentFrameWidth = idleFrameWidth;
             currentFrameHeight = (float)idleTexture.height;
-            drawScale = 0.52f;
+            drawScale = PLAYER_IDLE_SCALE;
             totalFrames = idleFrames;
             frameDuration = 0.15f;
         }
 
         float playerDrawWidth = currentFrameWidth * drawScale;
         float playerDrawHeight = currentFrameHeight * drawScale;
-        float visualOffsetY = isAttacking ? 60.0f : 0.0f;
+        float visualOffsetY = isAttacking ? PLAYER_ATTACK_GROUND_OFFSET : 0.0f;
         float playerDrawY = playerFeetY - playerDrawHeight + visualOffsetY;
 
         if (
@@ -1038,25 +1042,45 @@ int main(void)
             currentFrame >= 3 &&
             currentFrame <= 5;
 
-        float playerAttackWidth = isSpecialAttack ? 145.0f : 100.0f;
-        float playerAttackHeight = isSpecialAttack ? 100.0f : 82.0f;
+        float playerAttackWidth = isSpecialAttack
+            ? PLAYER_SPECIAL_ATTACK_WIDTH
+            : PLAYER_NORMAL_ATTACK_WIDTH;
+
+        float playerAttackHeight = isSpecialAttack
+            ? PLAYER_SPECIAL_ATTACK_HEIGHT
+            : PLAYER_NORMAL_ATTACK_HEIGHT;
+
+        float playerAttackGapLimit = isSpecialAttack
+            ? PLAYER_SPECIAL_ATTACK_GAP
+            : PLAYER_NORMAL_ATTACK_GAP;
 
         Rectangle playerAttackBox = {
             0.0f,
-            playerDrawY + playerDrawHeight * 0.30f,
+            playerBody.y + playerBody.height * 0.13f,
             playerAttackWidth,
             playerAttackHeight
         };
 
         playerAttackBox.x = facingRight
-            ? playerX + playerDrawWidth * 0.58f
-            : playerX - playerAttackBox.width * 0.62f;
+            ? playerBody.x + playerBody.width * 0.84f
+            : playerBody.x - playerAttackBox.width + playerBody.width * 0.16f;
 
         if (gameState == GAME_PLAYING && enemy.active)
         {
             float playerCenterX = playerBody.x + playerBody.width * 0.5f;
             float enemyCenterX = enemy.body.x + enemy.body.width * 0.5f;
             float distance = fabsf(playerCenterX - enemyCenterX);
+            float horizontalGap = 0.0f;
+
+            if (playerBody.x + playerBody.width < enemy.body.x)
+            {
+                horizontalGap = enemy.body.x - (playerBody.x + playerBody.width);
+            }
+            else if (enemy.body.x + enemy.body.width < playerBody.x)
+            {
+                horizontalGap = playerBody.x - (enemy.body.x + enemy.body.width);
+            }
+
             enemy.facingRight = playerCenterX > enemyCenterX;
 
             if (enemy.state == ENEMY_DYING)
@@ -1135,7 +1159,7 @@ int main(void)
             {
                 if (
                     !playerIsAboveEnemy &&
-                    distance <= enemy.attackRange &&
+                    horizontalGap <= enemy.attackRange &&
                     enemy.attackCooldownTimer <= 0.0f &&
                     playerHealth > 0
                 )
@@ -1147,7 +1171,7 @@ int main(void)
                 }
                 else if (
                     distance <= enemy.detectionRange &&
-                    distance > enemy.attackRange &&
+                    horizontalGap > enemy.attackRange &&
                     playerHealth > 0
                 )
                 {
@@ -1166,6 +1190,7 @@ int main(void)
                 playerAttackActive &&
                 !enemyHitThisAttack &&
                 enemy.state != ENEMY_DYING &&
+                horizontalGap <= playerAttackGapLimit &&
                 CheckCollisionRecs(playerAttackBox, enemy.body)
             )
             {
