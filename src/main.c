@@ -113,7 +113,12 @@ static void DamageEnemy(DummyEnemy *enemy, int damage, bool playerIsLeft)
 
 int main(void)
 {
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "IUT Red Box - Level 1 Dummy Enemy");
+
+    /* Start in borderless fullscreen mode. Press F11 to toggle it. */
+    ToggleBorderlessWindowed();
+
     InitAudioDevice();
     SetTargetFPS(60);
 
@@ -170,6 +175,13 @@ int main(void)
         CloseWindow();
         return 1;
     }
+
+    /*
+       The complete game is rendered at a fixed virtual resolution.
+       It is then scaled to the real monitor size without stretching.
+    */
+    RenderTexture2D gameTarget = LoadRenderTexture(SCREEN_WIDTH, SCREEN_HEIGHT);
+    SetTextureFilter(gameTarget.texture, TEXTURE_FILTER_BILINEAR);
 
     Rectangle backgroundSource = {0, 0, (float)background.width, (float)background.height};
     Rectangle backgroundDestination = {0, 0, SCREEN_WIDTH, SCREEN_HEIGHT};
@@ -283,6 +295,11 @@ int main(void)
         bool moveLeft = IsKeyDown(KEY_LEFT);
         bool movementKeyDown = moveRight || moveLeft;
 
+        if (IsKeyPressed(KEY_F11))
+        {
+            ToggleBorderlessWindowed();
+        }
+
         if (IsKeyPressed(KEY_F1)) showHitboxes = !showHitboxes;
 
         if (IsKeyPressed(KEY_R)) {
@@ -355,10 +372,6 @@ int main(void)
             verticalVelocity = jumpForce;
             isJumping = true;
 
-            /*
-             * Jump height অপরিবর্তিত রেখে সামান্য forward boost।
-             * এতে enemy-এর ওপর দিয়ে পরিষ্কারভাবে পার হওয়া সহজ হবে।
-             */
             if (moveRight && !moveLeft)
             {
                 playerX += isSprintJump ? 34.0f : 22.0f;
@@ -796,7 +809,8 @@ int main(void)
                 9.0f;
         }
 
-        BeginDrawing();
+        /* Draw the game to the fixed 1000 x 600 virtual canvas. */
+        BeginTextureMode(gameTarget);
         ClearBackground(BLACK);
         BeginMode2D(camera);
 
@@ -913,7 +927,7 @@ int main(void)
         DrawRectangle(0, 0, SCREEN_WIDTH, 118, Fade(BLACK, 0.68f));
         DrawText(TextFormat("IUT RED BOX  |  LEVEL %d", CURRENT_LEVEL), 24, 16, 28, WHITE);
         DrawText("LEFT/RIGHT Move | SHIFT Sprint | UP Jump | SPACE Attack", 24, 52, 18, LIGHTGRAY);
-        DrawText("F1 Debug hitboxes | F2 Ground line | R Restart", 24, 80, 17, GRAY);
+        DrawText("F1 Hitboxes | F2 Ground | F11 Fullscreen | R Restart", 24, 82, 14, GRAY);
 
         const char *comboText = isSpecialAttack && isAttacking
             ? "COMBO: SPECIAL ATTACK!"
@@ -1077,8 +1091,51 @@ int main(void)
             );
         }
 
+        EndTextureMode();
+
+        /* Scale the virtual canvas to the current window/monitor size. */
+        BeginDrawing();
+        ClearBackground(BLACK);
+
+        float realScreenWidth = (float)GetScreenWidth();
+        float realScreenHeight = (float)GetScreenHeight();
+        float screenScale = fminf(
+            realScreenWidth / (float)SCREEN_WIDTH,
+            realScreenHeight / (float)SCREEN_HEIGHT
+        );
+
+        float scaledWidth = (float)SCREEN_WIDTH * screenScale;
+        float scaledHeight = (float)SCREEN_HEIGHT * screenScale;
+        float screenOffsetX = (realScreenWidth - scaledWidth) * 0.5f;
+        float screenOffsetY = (realScreenHeight - scaledHeight) * 0.5f;
+
+        Rectangle targetSource = {
+            0.0f,
+            0.0f,
+            (float)gameTarget.texture.width,
+            -(float)gameTarget.texture.height
+        };
+
+        Rectangle targetDestination = {
+            screenOffsetX,
+            screenOffsetY,
+            scaledWidth,
+            scaledHeight
+        };
+
+        DrawTexturePro(
+            gameTarget.texture,
+            targetSource,
+            targetDestination,
+            (Vector2){0.0f, 0.0f},
+            0.0f,
+            WHITE
+        );
+
         EndDrawing();
     }
+
+    UnloadRenderTexture(gameTarget);
 
     UnloadTexture(background);
     UnloadTexture(idleTexture);
