@@ -136,7 +136,7 @@ static LevelEnemyConfig GetLevelEnemyConfig(int level)
 {
     switch (level)
     {
-        case 1: return (LevelEnemyConfig){30,  6,  38.0f, 430.0f, 17.0f, 1.80f, 0.60f};
+        case 1: return (LevelEnemyConfig){ 30,  6,  38.0f, 430.0f, 17.0f, 1.80f, 0.60f};
         case 2: return (LevelEnemyConfig){ 90, 10,  52.0f, 330.0f, 17.0f, 1.45f, 0.50f};
         case 3: return (LevelEnemyConfig){110, 12,  60.0f, 350.0f, 18.0f, 1.30f, 0.46f};
         case 4: return (LevelEnemyConfig){130, 14,  68.0f, 380.0f, 20.0f, 1.18f, 0.42f};
