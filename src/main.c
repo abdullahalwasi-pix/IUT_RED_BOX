@@ -27,6 +27,7 @@
 #define PLAYER_DEATH_FRAMES 8
 #define PLAYER_VICTORY_FRAMES 6
 #define PLAYER_DEATH_HOLD_FRAME (PLAYER_DEATH_FRAMES - 1)
+#define PLAYER_DEATH_FINAL_POSE_TIME 0.85f
 
 #define PLAYER_HURT_SCALE 0.52f
 #define PLAYER_DEATH_SCALE 0.52f
@@ -50,6 +51,9 @@
 #define ZOMBIE_HURT_FRAMES 4
 #define ZOMBIE_DEATH_FRAMES 8
 #define ZOMBIE_VICTORY_FRAMES 6
+#define ZOMBIE_DEATH_HOLD_FRAME (ZOMBIE_DEATH_FRAMES - 1)
+#define ZOMBIE_DEATH_FRAME_TIME 0.105f
+#define ZOMBIE_DEATH_FINAL_POSE_TIME 0.85f
 
 typedef enum {
     ENEMY_IDLE,
@@ -103,6 +107,7 @@ typedef struct {
     float attackTimer;
     float hurtTimer;
     float deathTimer;
+    float deathFinalPoseTimer;
 
     float frameSize;
     float drawScale;
@@ -111,6 +116,7 @@ typedef struct {
     float groundY;
 
     int animationFrame;
+    int deathFrame;
     float animationTimer;
 
     bool facingRight;
@@ -246,6 +252,9 @@ static void SetEnemyState(ZombieEnemy *enemy, EnemyState newState)
     else if (newState == ENEMY_DYING)
     {
         enemy->deathTimer = 0.0f;
+        enemy->deathFinalPoseTimer = 0.0f;
+        enemy->deathFrame = 0;
+        enemy->animationFrame = 0;
         enemy->damageApplied = true;
         enemy->deathFinished = false;
     }
@@ -302,6 +311,9 @@ static ZombieEnemy CreateZombieEnemy(
     enemy.attackWindup = config.attackWindup;
     enemy.facingRight = false;
     enemy.active = true;
+    enemy.deathFrame = 0;
+    enemy.deathTimer = 0.0f;
+    enemy.deathFinalPoseTimer = 0.0f;
     enemy.deathFinished = false;
 
     return enemy;
@@ -385,7 +397,22 @@ static Texture2D GetEnemyTexture(
 
 static Rectangle GetEnemySourceRectangle(const ZombieEnemy *enemy)
 {
-    float frameX = (float)enemy->animationFrame * enemy->frameSize;
+    
+    int renderFrame = enemy->animationFrame;
+
+    if (
+        enemy->state == ENEMY_DYING ||
+        enemy->health <= 0
+    )
+    {
+        renderFrame = enemy->deathFinished
+            ? ZOMBIE_DEATH_HOLD_FRAME
+            : enemy->deathFrame;
+    }
+
+    float frameX =
+        (float)renderFrame *
+        enemy->frameSize;
 
     if (enemy->facingRight)
     {
@@ -470,7 +497,15 @@ static void DrawZombieEnemy(
 {
     if (!enemy->active) return;
 
-    Texture2D texture = GetEnemyTexture(assets, enemy->state);
+    EnemyState renderState = enemy->state;
+
+    
+    if (enemy->health <= 0)
+    {
+        renderState = ENEMY_DYING;
+    }
+
+    Texture2D texture = GetEnemyTexture(assets, renderState);
     Rectangle source = GetEnemySourceRectangle(enemy);
     Rectangle destination = GetEnemyDestinationRectangle(enemy);
 
@@ -734,7 +769,10 @@ int main(void)
 
     float playerHurtTimer = 0.0f;
     float playerDeathTimer = 0.0f;
+    float playerDeathFinalPoseTimer = 0.0f;
     float playerVictoryTimer = 0.0f;
+
+    int playerDeathFrame = 0;
 
     float playerHurtAnchorCenterX =
         playerX + idleFrameWidth * PLAYER_IDLE_SCALE * 0.5f;
@@ -840,7 +878,9 @@ int main(void)
             playerDeathFinished = false;
             playerHurtTimer = 0.0f;
             playerDeathTimer = 0.0f;
+            playerDeathFinalPoseTimer = 0.0f;
             playerVictoryTimer = 0.0f;
+            playerDeathFrame = 0;
 
             playerHurtAnchorCenterX =
                 playerX + idleFrameWidth * PLAYER_IDLE_SCALE * 0.5f;
@@ -1024,19 +1064,33 @@ int main(void)
 
         if (playerIsDying && !playerDeathFinished)
         {
-            playerDeathTimer += dt;
+            
+            if (playerDeathFrame < PLAYER_DEATH_HOLD_FRAME)
+            {
+                playerDeathTimer += dt;
 
-            if (
-                playerDeathTimer >=
-                PLAYER_DEATH_FRAMES * PLAYER_DEATH_FRAME_TIME
-            )
+                while (
+                    playerDeathTimer >= PLAYER_DEATH_FRAME_TIME &&
+                    playerDeathFrame < PLAYER_DEATH_HOLD_FRAME
+                )
+                {
+                    playerDeathTimer -= PLAYER_DEATH_FRAME_TIME;
+                    playerDeathFrame++;
+                }
+            }
+            else
             {
                 
-                playerDeathTimer =
-                    PLAYER_DEATH_HOLD_FRAME *
-                    PLAYER_DEATH_FRAME_TIME;
+                playerDeathFrame = PLAYER_DEATH_HOLD_FRAME;
+                playerDeathFinalPoseTimer += dt;
 
-                playerDeathFinished = true;
+                if (
+                    playerDeathFinalPoseTimer >=
+                    PLAYER_DEATH_FINAL_POSE_TIME
+                )
+                {
+                    playerDeathFinished = true;
+                }
             }
         }
 
@@ -1189,27 +1243,9 @@ int main(void)
 
         if (playerIsDying || playerDeathFinished)
         {
-            int deathFrame;
-
-            if (playerDeathFinished)
-            {
-                deathFrame = PLAYER_DEATH_HOLD_FRAME;
-            }
-            else
-            {
-                deathFrame =
-                    (int)(
-                        playerDeathTimer /
-                        PLAYER_DEATH_FRAME_TIME
-                    );
-
-                if (deathFrame > PLAYER_DEATH_HOLD_FRAME)
-                {
-                    deathFrame = PLAYER_DEATH_HOLD_FRAME;
-                }
-            }
-
-            currentFrame = deathFrame;
+            currentFrame = playerDeathFinished
+                ? PLAYER_DEATH_HOLD_FRAME
+                : playerDeathFrame;
         }
         else if (gameState == GAME_VICTORY)
         {
@@ -1405,24 +1441,45 @@ int main(void)
 
             if (enemy.state == ENEMY_DYING)
             {
-                enemy.deathTimer += dt;
-                int deathFrame = (int)(enemy.deathTimer / 0.105f);
-
-                if (deathFrame >= ZOMBIE_DEATH_FRAMES)
+                
+                if (enemy.deathFrame < ZOMBIE_DEATH_HOLD_FRAME)
                 {
-                    enemy.animationFrame = ZOMBIE_DEATH_FRAMES - 1;
+                    enemy.deathTimer += dt;
+
+                    while (
+                        enemy.deathTimer >=
+                            ZOMBIE_DEATH_FRAME_TIME &&
+                        enemy.deathFrame <
+                            ZOMBIE_DEATH_HOLD_FRAME
+                    )
+                    {
+                        enemy.deathTimer -=
+                            ZOMBIE_DEATH_FRAME_TIME;
+
+                        enemy.deathFrame++;
+                    }
                 }
                 else
                 {
-                    enemy.animationFrame = deathFrame;
+                    enemy.deathFrame =
+                        ZOMBIE_DEATH_HOLD_FRAME;
+
+                    enemy.deathFinalPoseTimer += dt;
+
+                    if (
+                        enemy.deathFinalPoseTimer >=
+                        ZOMBIE_DEATH_FINAL_POSE_TIME
+                    )
+                    {
+                        enemy.deathFinished = true;
+                    }
                 }
 
-                if (enemy.deathTimer >= 1.30f)
-                {
-                    enemy.deathTimer = 1.30f;
-                    enemy.animationFrame = ZOMBIE_DEATH_FRAMES - 1;
-                    enemy.deathFinished = true;
-                }
+       
+                enemy.animationFrame =
+                    enemy.deathFinished
+                        ? ZOMBIE_DEATH_HOLD_FRAME
+                        : enemy.deathFrame;
             }
             else if (enemy.state == ENEMY_HURT)
             {
@@ -1484,6 +1541,11 @@ int main(void)
                             playerIsDying = true;
                             playerDeathFinished = false;
                             playerDeathTimer = 0.0f;
+
+                            playerDeathFinalPoseTimer = 0.0f;
+                            playerDeathFrame = 0;
+
+                            
 
                             
                             playerDeathAnchorCenterX =
@@ -1617,9 +1679,10 @@ int main(void)
                 gameState = GAME_DEFEAT;
                 resultTimer = 0.0f;
 
-                playerDeathTimer =
-                    PLAYER_DEATH_HOLD_FRAME *
-                    PLAYER_DEATH_FRAME_TIME;
+                playerDeathFrame = PLAYER_DEATH_HOLD_FRAME;
+                playerDeathTimer = 0.0f;
+                playerDeathFinalPoseTimer =
+                    PLAYER_DEATH_FINAL_POSE_TIME;
 
                 currentFrame = PLAYER_DEATH_HOLD_FRAME;
                 frameTimer = 0.0f;
@@ -1643,6 +1706,18 @@ int main(void)
             }
             else if (enemy.deathFinished && playerHealth > 0)
             {
+                /*
+                   Lock the defeated zombie to the final lying frame before
+                   switching into the player-victory presentation.
+                */
+                enemy.state = ENEMY_DYING;
+                enemy.deathFrame = ZOMBIE_DEATH_HOLD_FRAME;
+                enemy.animationFrame = ZOMBIE_DEATH_HOLD_FRAME;
+                enemy.deathTimer = 0.0f;
+                enemy.deathFinalPoseTimer =
+                    ZOMBIE_DEATH_FINAL_POSE_TIME;
+                enemy.deathFinished = true;
+
                 gameState = GAME_VICTORY;
                 resultTimer = 0.0f;
                 playerVictoryTimer = 0.0f;
@@ -1687,15 +1762,24 @@ int main(void)
             camera.offset = (Vector2){0.0f, 0.0f};
         }
 
+        int playerRenderFrame = currentFrame;
+
+        if (playerIsDying || playerDeathFinished)
+        {
+            playerRenderFrame = playerDeathFinished
+                ? PLAYER_DEATH_HOLD_FRAME
+                : playerDeathFrame;
+        }
+
         Rectangle sourceRectangle = facingRight
             ? (Rectangle){
-                currentFrame * currentFrameWidth,
+                playerRenderFrame * currentFrameWidth,
                 0.0f,
                 currentFrameWidth,
                 currentFrameHeight
             }
             : (Rectangle){
-                (currentFrame + 1) * currentFrameWidth,
+                (playerRenderFrame + 1) * currentFrameWidth,
                 0.0f,
                 -currentFrameWidth,
                 currentFrameHeight
@@ -1779,6 +1863,8 @@ int main(void)
         Color playerTint = WHITE;
 
         if (
+            !playerIsDying &&
+            !playerDeathFinished &&
             playerInvulnerabilityTimer > 0.0f &&
             ((int)(playerInvulnerabilityTimer * 18.0f) % 2 == 0)
         )
