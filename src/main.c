@@ -26,7 +26,7 @@
 #define PLAYER_HURT_FRAMES 3
 #define PLAYER_DEATH_FRAMES 8
 #define PLAYER_VICTORY_FRAMES 6
-
+#define PLAYER_DEATH_HOLD_FRAME (PLAYER_DEATH_FRAMES - 1)
 
 #define PLAYER_HURT_SCALE 0.52f
 #define PLAYER_DEATH_SCALE 0.52f
@@ -39,7 +39,7 @@
 #define PLAYER_HURT_FRAME_TIME 0.085f
 #define PLAYER_DEATH_FRAME_TIME 0.110f
 #define PLAYER_VICTORY_FRAME_TIME 0.140f
-#define RESULT_PANEL_DELAY 1.20f
+#define RESULT_PANEL_DELAY 3.00f
 
 #define ZOMBIE_BASELINE_RATIO (226.0f / 256.0f)
 #define ZOMBIE_PLAYER_HEIGHT_RATIO 0.68f
@@ -1031,8 +1031,11 @@ int main(void)
                 PLAYER_DEATH_FRAMES * PLAYER_DEATH_FRAME_TIME
             )
             {
+                
                 playerDeathTimer =
-                    PLAYER_DEATH_FRAMES * PLAYER_DEATH_FRAME_TIME;
+                    PLAYER_DEATH_HOLD_FRAME *
+                    PLAYER_DEATH_FRAME_TIME;
+
                 playerDeathFinished = true;
             }
         }
@@ -1186,12 +1189,24 @@ int main(void)
 
         if (playerIsDying || playerDeathFinished)
         {
-            int deathFrame =
-                (int)(playerDeathTimer / PLAYER_DEATH_FRAME_TIME);
+            int deathFrame;
 
-            if (deathFrame >= PLAYER_DEATH_FRAMES)
+            if (playerDeathFinished)
             {
-                deathFrame = PLAYER_DEATH_FRAMES - 1;
+                deathFrame = PLAYER_DEATH_HOLD_FRAME;
+            }
+            else
+            {
+                deathFrame =
+                    (int)(
+                        playerDeathTimer /
+                        PLAYER_DEATH_FRAME_TIME
+                    );
+
+                if (deathFrame > PLAYER_DEATH_HOLD_FRAME)
+                {
+                    deathFrame = PLAYER_DEATH_HOLD_FRAME;
+                }
             }
 
             currentFrame = deathFrame;
@@ -1481,7 +1496,7 @@ int main(void)
                             playerIsHurt = true;
                             playerHurtTimer = 0.0f;
 
-                            
+                           
                             playerHurtAnchorCenterX =
                                 currentPlayerVisualCenterX;
                         }
@@ -1601,6 +1616,14 @@ int main(void)
             {
                 gameState = GAME_DEFEAT;
                 resultTimer = 0.0f;
+
+                playerDeathTimer =
+                    PLAYER_DEATH_HOLD_FRAME *
+                    PLAYER_DEATH_FRAME_TIME;
+
+                currentFrame = PLAYER_DEATH_HOLD_FRAME;
+                frameTimer = 0.0f;
+
                 isAttacking = false;
                 isRunning = false;
                 isSprinting = false;
@@ -1802,37 +1825,135 @@ int main(void)
             );
         }
 
-        DrawRectangle(0, 0, SCREEN_WIDTH, 118, Fade(BLACK, 0.68f));
-        DrawText(TextFormat("IUT RED BOX  |  LEVEL %d", CURRENT_LEVEL), 24, 16, 28, WHITE);
-        DrawText("LEFT/RIGHT Move | SHIFT Sprint | UP Jump | SPACE Attack", 24, 52, 18, LIGHTGRAY);
-        DrawText("F1 Hitboxes | F2 Ground | F11 Fullscreen | R Restart", 24, 82, 14, GRAY);
-
-        const char *comboText = isSpecialAttack && isAttacking
-            ? "COMBO: SPECIAL ATTACK!"
-            : TextFormat("COMBO: %d / %d", comboAttackCount, COMBO_REQUIRED_ATTACKS);
-
-        DrawText(
-            comboText,
-            420,
-            82,
-            18,
-            isSpecialAttack && isAttacking ? GOLD : LIGHTGRAY
+        DrawRectangle(
+            0,
+            0,
+            SCREEN_WIDTH,
+            112,
+            Fade(BLACK, 0.72f)
         );
 
-        DrawText("PLAYER", 690, 18, 17, WHITE);
+        
+        DrawText(
+            "IUT RED BOX",
+            24,
+            18,
+            30,
+            RED
+        );
 
-        Rectangle playerBarBack = {690.0f, 43.0f, 270.0f, 20.0f};
-        Rectangle playerBarFill = {
+        DrawText(
+            TextFormat("LEVEL %d", CURRENT_LEVEL),
+            25,
+            58,
+            24,
+            RAYWHITE
+        );
+
+        DrawText(
+            "PROFESSOR",
+            690,
+            12,
+            17,
+            RAYWHITE
+        );
+
+        Rectangle playerBarBack = {
             690.0f,
-            43.0f,
-            270.0f * ((float)playerHealth / (float)PLAYER_MAX_HEALTH),
+            35.0f,
+            270.0f,
             20.0f
         };
 
-        DrawRectangleRec(playerBarBack, DARKGRAY);
-        DrawRectangleRec(playerBarFill, playerHealth > 30 ? LIME : RED);
-        DrawRectangleLinesEx(playerBarBack, 2.0f, WHITE);
-        DrawText(TextFormat("%d / %d", playerHealth, PLAYER_MAX_HEALTH), 786, 44, 17, BLACK);
+        Rectangle playerBarFill = {
+            playerBarBack.x,
+            playerBarBack.y,
+            playerBarBack.width *
+                (
+                    (float)playerHealth /
+                    (float)PLAYER_MAX_HEALTH
+                ),
+            playerBarBack.height
+        };
+
+        DrawRectangleRounded(
+            playerBarBack,
+            0.28f,
+            8,
+            DARKGRAY
+        );
+
+        DrawRectangleRounded(
+            playerBarFill,
+            0.28f,
+            8,
+            playerHealth > 30 ? LIME : RED
+        );
+
+        DrawRectangleLinesEx(
+            playerBarBack,
+            2.0f,
+            RAYWHITE
+        );
+
+        DrawText(
+            TextFormat(
+                "%d / %d",
+                playerHealth,
+                PLAYER_MAX_HEALTH
+            ),
+            786,
+            37,
+            17,
+            BLACK
+        );
+
+        const char *comboText =
+            isSpecialAttack && isAttacking
+                ? "COMBO: SPECIAL ATTACK!"
+                : TextFormat(
+                    "COMBO: %d / %d",
+                    comboAttackCount,
+                    COMBO_REQUIRED_ATTACKS
+                );
+
+        Rectangle comboBox = {
+            690.0f,
+            68.0f,
+            270.0f,
+            29.0f
+        };
+
+        Color comboAccent =
+            isSpecialAttack && isAttacking
+                ? GOLD
+                : SKYBLUE;
+
+        DrawRectangleRounded(
+            comboBox,
+            0.25f,
+            8,
+            Fade(BLACK, 0.82f)
+        );
+
+        DrawRectangleLinesEx(
+            comboBox,
+            2.0f,
+            comboAccent
+        );
+
+        int comboTextX =
+            isSpecialAttack && isAttacking
+                ? 728
+                : 772;
+
+        DrawText(
+            comboText,
+            comboTextX,
+            (int)(comboBox.y + 5.0f),
+            17,
+            comboAccent
+        );
 
         if (isSpecialAttack && isAttacking && playerAttackActive)
         {
