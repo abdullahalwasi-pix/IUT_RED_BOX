@@ -1,0 +1,16 @@
+SET: RAYLIB_PATH=C:\raylib\raylib
+SET: COMPILER_PATH=C:\raylib\w64devkit\bin
+
+ENV_SET: PATH=$(COMPILER_PATH)
+
+CD: C:\Users\LOQ\Desktop\IUT_Red_Box\src
+
+cmd /c IF EXIST main.exe del /F /Q main.exe
+
+NPP_SAVEALL
+
+gcc -o main.exe main.c game.c player.c enemy.c $(RAYLIB_PATH)\src\raylib.rc.data -s -static -O3 -std=c99 -Wall -Wshadow -Wunused-parameter -I..\include -I$(RAYLIB_PATH)\src -DPLATFORM_DESKTOP -L. -lraylib -lopengl32 -lgdi32 -lwinmm -lshcore
+
+cmd /c IF EXIST main.exe main.exe
+
+ENV_UNSET: PATH

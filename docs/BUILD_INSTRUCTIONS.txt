@@ -1,0 +1,59 @@
+IUT RED BOX — FINAL MODULAR BUILD INSTRUCTIONS
+
+FOLDER STRUCTURE
+----------------
+IUT_Red_Box
+|-- assets
+|-- docs
+|   |-- BUILD_INSTRUCTIONS.txt
+|   `-- NPP_EXEC_SCRIPT.txt
+|-- include
+|   |-- config.h
+|   |-- enemy.h
+|   |-- game.h
+|   `-- player.h
+|-- presentation
+|-- src
+|   |-- enemy.c
+|   |-- game.c
+|   |-- main.c
+|   `-- player.c
+`-- BUILD_AND_RUN.bat
+
+FASTEST AND SAFEST WAY
+----------------------
+1. Extract this ZIP directly inside:
+   C:\Users\LOQ\Desktop\IUT_Red_Box
+
+2. Allow Windows to merge folders and replace the existing source/header files.
+
+3. Do NOT press the old Notepad++ Run button.
+   The old button compiles only the currently open file.
+
+4. Double-click:
+   BUILD_AND_RUN.bat
+
+The batch file always:
+- enters the src folder,
+- compiles main.c, game.c, player.c, and enemy.c together,
+- adds the include folder with -I..\include,
+- creates src\main.exe,
+- runs the game from src so ../assets paths work correctly.
+
+MANUAL CMD COMMAND
+------------------
+Open CMD inside:
+C:\Users\LOQ\Desktop\IUT_Red_Box\src
+
+Then run:
+
+C:\raylib\w64devkit\bin\gcc.exe -o main.exe main.c game.c player.c enemy.c C:\raylib\raylib\src\raylib.rc.data -s -static -O3 -std=c99 -Wall -Wshadow -Wunused-parameter -I..\include -IC:\raylib\raylib\src -DPLATFORM_DESKTOP -L. -lraylib -lopengl32 -lgdi32 -lwinmm -lshcore
+
+Then:
+main.exe
+
+IMPORTANT
+---------
+Never compile a .h file directly.
+Never compile only main.c for this modular project.
+All four .c files must be compiled together.
