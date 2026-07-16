@@ -1,21 +1,34 @@
 #include "raylib.h"
 #include <math.h>
 #include <stdbool.h>
+
 #define SCREEN_WIDTH 1000
 #define SCREEN_HEIGHT 600
 #define CURRENT_LEVEL 1
+
 #define PLAYER_MAX_HEALTH 100
 #define PLAYER_SWORD_DAMAGE 25
 #define PLAYER_SPECIAL_DAMAGE 50
 #define COMBO_REQUIRED_ATTACKS 3
 #define COMBO_RESET_TIME 0.90f
 
+#define ZOMBIE_BASELINE_RATIO (226.0f / 256.0f)
+#define ZOMBIE_PLAYER_HEIGHT_RATIO 0.59f
+#define ZOMBIE_GROUND_OFFSET -48.0f
+#define ZOMBIE_IDLE_FRAMES 8
+#define ZOMBIE_WALK_FRAMES 8
+#define ZOMBIE_ATTACK_FRAMES 8
+#define ZOMBIE_HURT_FRAMES 4
+#define ZOMBIE_DEATH_FRAMES 8
+#define ZOMBIE_VICTORY_FRAMES 6
+
 typedef enum {
     ENEMY_IDLE,
     ENEMY_CHASING,
     ENEMY_ATTACKING,
     ENEMY_HURT,
-    ENEMY_DEAD
+    ENEMY_DYING,
+    ENEMY_VICTORY
 } EnemyState;
 
 typedef enum {
@@ -35,12 +48,23 @@ typedef struct {
 } LevelEnemyConfig;
 
 typedef struct {
+    Texture2D idle;
+    Texture2D walk;
+    Texture2D attack;
+    Texture2D hurt;
+    Texture2D death;
+    Texture2D victory;
+} ZombieAssets;
+
+typedef struct {
     Rectangle body;
     Rectangle attackBox;
     EnemyState state;
+
     int health;
     int maxHealth;
     int damage;
+
     float moveSpeed;
     float detectionRange;
     float attackRange;
@@ -50,29 +74,162 @@ typedef struct {
     float attackTimer;
     float hurtTimer;
     float deathTimer;
+
+    float frameSize;
+    float drawScale;
+    float drawWidth;
+    float drawHeight;
+    float groundY;
+
+    int animationFrame;
+    float animationTimer;
+
     bool facingRight;
     bool damageApplied;
     bool active;
-} DummyEnemy;
+} ZombieEnemy;
+
+static float ClampFloat(float value, float minimum, float maximum)
+{
+    if (value < minimum) return minimum;
+    if (value > maximum) return maximum;
+    return value;
+}
 
 static LevelEnemyConfig GetLevelEnemyConfig(int level)
 {
-    switch (level) {
-        case 1: return (LevelEnemyConfig){250,  6,  40.0f, 900.0f, 78.0f, 1.80f, 0.60f };
-        case 2: return (LevelEnemyConfig){ 90, 10,  52.0f, 330.0f, 72.0f, 1.45f, 0.50f };
-        case 3: return (LevelEnemyConfig){110, 12,  60.0f, 350.0f, 75.0f, 1.30f, 0.46f };
-        case 4: return (LevelEnemyConfig){130, 14,  68.0f, 380.0f, 78.0f, 1.18f, 0.42f };
-        case 5: return (LevelEnemyConfig){155, 17,  77.0f, 410.0f, 82.0f, 1.05f, 0.38f };
-        case 6: return (LevelEnemyConfig){185, 20,  88.0f, 450.0f, 86.0f, 0.92f, 0.34f };
+    switch (level)
+    {
+        case 1: return (LevelEnemyConfig){250,  6,  40.0f, 900.0f, 78.0f, 1.80f, 0.60f};
+        case 2: return (LevelEnemyConfig){ 90, 10,  52.0f, 330.0f, 72.0f, 1.45f, 0.50f};
+        case 3: return (LevelEnemyConfig){110, 12,  60.0f, 350.0f, 75.0f, 1.30f, 0.46f};
+        case 4: return (LevelEnemyConfig){130, 14,  68.0f, 380.0f, 78.0f, 1.18f, 0.42f};
+        case 5: return (LevelEnemyConfig){155, 17,  77.0f, 410.0f, 82.0f, 1.05f, 0.38f};
+        case 6: return (LevelEnemyConfig){185, 20,  88.0f, 450.0f, 86.0f, 0.92f, 0.34f};
         case 7:
-        default:return (LevelEnemyConfig){225, 24, 100.0f, 500.0f, 90.0f, 0.80f, 0.30f };
+        default: return (LevelEnemyConfig){225, 24, 100.0f, 500.0f, 90.0f, 0.80f, 0.30f};
     }
 }
 
-static DummyEnemy CreateDummyEnemy(float x, float groundY, LevelEnemyConfig config)
+static ZombieAssets LoadZombieAssets(void)
 {
-    DummyEnemy enemy = {0};
-    enemy.body = (Rectangle){x, groundY - 118.0f, 58.0f, 118.0f};
+    ZombieAssets assets = {0};
+    assets.idle = LoadTexture("../assets/enemy/zombie_student/idle.png");
+    assets.walk = LoadTexture("../assets/enemy/zombie_student/walk.png");
+    assets.attack = LoadTexture("../assets/enemy/zombie_student/attack.png");
+    assets.hurt = LoadTexture("../assets/enemy/zombie_student/hurt.png");
+    assets.death = LoadTexture("../assets/enemy/zombie_student/death.png");
+    assets.victory = LoadTexture("../assets/enemy/zombie_student/victory.png");
+    return assets;
+}
+
+static bool ZombieAssetsAreValid(const ZombieAssets *assets)
+{
+    return IsTextureValid(assets->idle) &&
+           IsTextureValid(assets->walk) &&
+           IsTextureValid(assets->attack) &&
+           IsTextureValid(assets->hurt) &&
+           IsTextureValid(assets->death) &&
+           IsTextureValid(assets->victory);
+}
+
+static bool TextureUsesEqualSquareFrames(Texture2D texture, int frameCount, int frameSize)
+{
+    return texture.height == frameSize &&
+           texture.width == frameSize * frameCount;
+}
+
+static bool ZombieAssetLayoutIsValid(const ZombieAssets *assets)
+{
+    int frameSize = assets->idle.height;
+
+    if (frameSize <= 0)
+    {
+        return false;
+    }
+
+    return TextureUsesEqualSquareFrames(assets->idle, ZOMBIE_IDLE_FRAMES, frameSize) &&
+           TextureUsesEqualSquareFrames(assets->walk, ZOMBIE_WALK_FRAMES, frameSize) &&
+           TextureUsesEqualSquareFrames(assets->attack, ZOMBIE_ATTACK_FRAMES, frameSize) &&
+           TextureUsesEqualSquareFrames(assets->hurt, ZOMBIE_HURT_FRAMES, frameSize) &&
+           TextureUsesEqualSquareFrames(assets->death, ZOMBIE_DEATH_FRAMES, frameSize) &&
+           TextureUsesEqualSquareFrames(assets->victory, ZOMBIE_VICTORY_FRAMES, frameSize);
+}
+
+static void UnloadZombieAssets(ZombieAssets *assets)
+{
+    if (IsTextureValid(assets->idle)) UnloadTexture(assets->idle);
+    if (IsTextureValid(assets->walk)) UnloadTexture(assets->walk);
+    if (IsTextureValid(assets->attack)) UnloadTexture(assets->attack);
+    if (IsTextureValid(assets->hurt)) UnloadTexture(assets->hurt);
+    if (IsTextureValid(assets->death)) UnloadTexture(assets->death);
+    if (IsTextureValid(assets->victory)) UnloadTexture(assets->victory);
+}
+
+static void SetEnemyState(ZombieEnemy *enemy, EnemyState newState)
+{
+    if (enemy->state == newState) return;
+
+    enemy->state = newState;
+    enemy->animationFrame = 0;
+    enemy->animationTimer = 0.0f;
+
+    if (newState == ENEMY_ATTACKING)
+    {
+        enemy->attackTimer = 0.0f;
+        enemy->damageApplied = false;
+    }
+    else if (newState == ENEMY_HURT)
+    {
+        enemy->hurtTimer = 0.0f;
+    }
+    else if (newState == ENEMY_DYING)
+    {
+        enemy->deathTimer = 0.0f;
+        enemy->damageApplied = true;
+    }
+}
+
+static ZombieEnemy CreateZombieEnemy(
+    float bodyX,
+    float groundY,
+    float playerStandingDrawHeight,
+    float zombieFrameSize,
+    LevelEnemyConfig config
+)
+{
+    ZombieEnemy enemy = {0};
+
+    enemy.frameSize = zombieFrameSize;
+
+    enemy.drawHeight =
+        playerStandingDrawHeight *
+        ZOMBIE_PLAYER_HEIGHT_RATIO;
+
+    enemy.drawWidth = enemy.drawHeight;
+    enemy.drawScale =
+        enemy.drawHeight /
+        zombieFrameSize;
+
+    enemy.groundY =
+        groundY +
+        ZOMBIE_GROUND_OFFSET;
+
+    float bodyHeight =
+        enemy.drawHeight *
+        0.77f;
+
+    float bodyWidth =
+        enemy.drawHeight *
+        0.38f;
+
+    enemy.body = (Rectangle){
+        bodyX,
+        enemy.groundY - bodyHeight,
+        bodyWidth,
+        bodyHeight
+    };
+
     enemy.state = ENEMY_IDLE;
     enemy.health = config.maxHealth;
     enemy.maxHealth = config.maxHealth;
@@ -82,41 +239,247 @@ static DummyEnemy CreateDummyEnemy(float x, float groundY, LevelEnemyConfig conf
     enemy.attackRange = config.attackRange;
     enemy.attackCooldown = config.attackCooldown;
     enemy.attackWindup = config.attackWindup;
+    enemy.facingRight = false;
     enemy.active = true;
+
     return enemy;
 }
 
-static Rectangle GetEnemyAttackBox(const DummyEnemy *enemy)
+static Rectangle GetEnemyAttackBox(const ZombieEnemy *enemy)
 {
-    Rectangle box = {0.0f, enemy->body.y + 44.0f, 72.0f, 50.0f};
+    float attackWidth = enemy->body.height * 0.76f;
+    float attackHeight = enemy->body.height * 0.48f;
+
+    Rectangle box = {
+        0.0f,
+        enemy->body.y + enemy->body.height * 0.25f,
+        attackWidth,
+        attackHeight
+    };
+
     box.x = enemy->facingRight
-        ? enemy->body.x + enemy->body.width - 4.0f
-        : enemy->body.x - box.width + 4.0f;
+        ? enemy->body.x + enemy->body.width - 3.0f
+        : enemy->body.x - box.width + 3.0f;
+
     return box;
 }
 
-static void DamageEnemy(DummyEnemy *enemy, int damage, bool playerIsLeft)
+static void AdvanceLoopingAnimation(
+    ZombieEnemy *enemy,
+    int frameCount,
+    float frameDuration,
+    float dt
+)
 {
-    if (!enemy->active || enemy->state == ENEMY_DEAD) return;
+    enemy->animationTimer += dt;
+
+    while (enemy->animationTimer >= frameDuration)
+    {
+        enemy->animationTimer -= frameDuration;
+        enemy->animationFrame = (enemy->animationFrame + 1) % frameCount;
+    }
+}
+
+static void DamageEnemy(
+    ZombieEnemy *enemy,
+    int damage,
+    bool playerIsLeft
+)
+{
+    if (!enemy->active || enemy->state == ENEMY_DYING || enemy->state == ENEMY_VICTORY)
+    {
+        return;
+    }
 
     enemy->health -= damage;
-    if (enemy->health <= 0) {
+
+    if (enemy->health <= 0)
+    {
         enemy->health = 0;
-        enemy->state = ENEMY_DEAD;
-        enemy->deathTimer = 0.0f;
-    } else {
-        enemy->state = ENEMY_HURT;
-        enemy->hurtTimer = 0.24f;
-        enemy->body.x += playerIsLeft ? 18.0f : -18.0f;
+        SetEnemyState(enemy, ENEMY_DYING);
+        return;
+    }
+
+    SetEnemyState(enemy, ENEMY_HURT);
+    enemy->body.x += playerIsLeft ? 18.0f : -18.0f;
+}
+
+static Texture2D GetEnemyTexture(
+    const ZombieAssets *assets,
+    EnemyState state
+)
+{
+    switch (state)
+    {
+        case ENEMY_CHASING: return assets->walk;
+        case ENEMY_ATTACKING: return assets->attack;
+        case ENEMY_HURT: return assets->hurt;
+        case ENEMY_DYING: return assets->death;
+        case ENEMY_VICTORY: return assets->victory;
+        case ENEMY_IDLE:
+        default: return assets->idle;
+    }
+}
+
+static Rectangle GetEnemySourceRectangle(const ZombieEnemy *enemy)
+{
+    float frameX = (float)enemy->animationFrame * enemy->frameSize;
+
+    if (enemy->facingRight)
+    {
+        return (Rectangle){
+            frameX,
+            0.0f,
+            enemy->frameSize,
+            enemy->frameSize
+        };
+    }
+
+    return (Rectangle){
+        frameX + enemy->frameSize,
+        0.0f,
+        -enemy->frameSize,
+        enemy->frameSize
+    };
+}
+
+static Rectangle GetEnemyDestinationRectangle(const ZombieEnemy *enemy)
+{
+    float bodyCenterX = enemy->body.x + enemy->body.width * 0.5f;
+    float drawX = bodyCenterX - enemy->drawWidth * 0.5f;
+    float drawY = enemy->groundY - enemy->drawHeight * ZOMBIE_BASELINE_RATIO;
+
+    return (Rectangle){
+        drawX,
+        drawY,
+        enemy->drawWidth,
+        enemy->drawHeight
+    };
+}
+
+static void DrawEnemyHealthBar(const ZombieEnemy *enemy)
+{
+    if (enemy->state == ENEMY_DYING || enemy->state == ENEMY_VICTORY)
+    {
+        return;
+    }
+
+    Rectangle spriteDestination = GetEnemyDestinationRectangle(enemy);
+    float barWidth = 122.0f;
+    float barHeight = 10.0f;
+    float ratio = (float)enemy->health / (float)enemy->maxHealth;
+
+    Rectangle back = {
+        spriteDestination.x + spriteDestination.width * 0.5f - barWidth * 0.5f,
+        spriteDestination.y - 19.0f,
+        barWidth,
+        barHeight
+    };
+
+    Rectangle fill = {
+        back.x + 2.0f,
+        back.y + 2.0f,
+        (back.width - 4.0f) * ratio,
+        back.height - 4.0f
+    };
+
+    DrawRectangleRounded(back, 0.35f, 8, Fade(BLACK, 0.82f));
+    DrawRectangleRounded(
+        fill,
+        0.35f,
+        8,
+        ratio > 0.50f ? LIME : (ratio > 0.22f ? ORANGE : RED)
+    );
+
+    DrawText(
+        "ZOMBIE STUDENT",
+        (int)(back.x + 5.0f),
+        (int)(back.y - 16.0f),
+        12,
+        RAYWHITE
+    );
+}
+
+static void DrawZombieEnemy(
+    const ZombieEnemy *enemy,
+    const ZombieAssets *assets,
+    bool showHitboxes
+)
+{
+    if (!enemy->active) return;
+
+    Texture2D texture = GetEnemyTexture(assets, enemy->state);
+    Rectangle source = GetEnemySourceRectangle(enemy);
+    Rectangle destination = GetEnemyDestinationRectangle(enemy);
+
+    DrawEllipse(
+        (int)(enemy->body.x + enemy->body.width * 0.5f),
+        (int)(enemy->groundY + 2.0f),
+        enemy->drawWidth * 0.19f,
+        7.0f,
+        Fade(BLACK, 0.28f)
+    );
+
+    if (enemy->state == ENEMY_ATTACKING && !enemy->damageApplied)
+    {
+        float pulse = 0.55f + 0.25f * sinf(enemy->attackTimer * 16.0f);
+        DrawCircleLines(
+            (int)(enemy->body.x + enemy->body.width * 0.5f),
+            (int)(enemy->body.y + 18.0f),
+            17.0f + 3.0f * pulse,
+            Fade(ORANGE, 0.85f)
+        );
+
+        DrawText(
+            "!",
+            (int)(enemy->body.x + enemy->body.width * 0.5f - 4.0f),
+            (int)(enemy->body.y - 16.0f),
+            24,
+            ORANGE
+        );
+    }
+
+    Color tint = WHITE;
+
+    if (enemy->state == ENEMY_HURT && ((int)(enemy->hurtTimer * 28.0f) % 2 == 0))
+    {
+        tint = (Color){255, 155, 155, 255};
+    }
+    else if (enemy->state == ENEMY_DYING)
+    {
+        float fadeStart = 1.00f;
+        float alpha = enemy->deathTimer > fadeStart
+            ? ClampFloat(1.0f - (enemy->deathTimer - fadeStart) / 0.35f, 0.35f, 1.0f)
+            : 1.0f;
+        tint = Fade(WHITE, alpha);
+    }
+
+    DrawTexturePro(
+        texture,
+        source,
+        destination,
+        (Vector2){0.0f, 0.0f},
+        0.0f,
+        tint
+    );
+
+    DrawEnemyHealthBar(enemy);
+
+    if (showHitboxes)
+    {
+        DrawRectangleLinesEx(enemy->body, 2.0f, RED);
+
+        if (enemy->state == ENEMY_ATTACKING)
+        {
+            DrawRectangleLinesEx(enemy->attackBox, 2.0f, ORANGE);
+        }
     }
 }
 
 int main(void)
 {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "IUT Red Box - Level 1 Dummy Enemy");
-
-    /* Start in borderless fullscreen mode. Press F11 to toggle it. */
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "IUT Red Box - Level 1 Zombie Student");
     ToggleBorderlessWindowed();
 
     InitAudioDevice();
@@ -127,6 +490,7 @@ int main(void)
     Texture2D runTexture = LoadTexture("../assets/player/run.png");
     Texture2D jumpTexture = LoadTexture("../assets/player/jump.png");
     Texture2D swordTexture = LoadTexture("../assets/player/sword.png");
+    ZombieAssets zombieAssets = LoadZombieAssets();
 
     Sound swordSwingSound = LoadSound("../assets/audio/sword_swing.wav");
     Sound swordHitSound = LoadSound("../assets/audio/sword_hit.wav");
@@ -156,45 +520,87 @@ int main(void)
     if (victorySoundReady) SetSoundVolume(victorySound, 0.50f);
     if (defeatSoundReady) SetSoundVolume(defeatSound, 0.50f);
     if (level1IntroSoundReady) SetSoundVolume(level1IntroSound, 0.52f);
+
     if (level1AmbienceReady)
     {
         SetMusicVolume(level1Ambience, 0.20f);
         level1Ambience.looping = true;
     }
 
-    if (!IsTextureValid(background) || !IsTextureValid(idleTexture) ||
-        !IsTextureValid(runTexture) || !IsTextureValid(jumpTexture) ||
-        !IsTextureValid(swordTexture)) {
+    bool playerTexturesValid =
+        IsTextureValid(background) &&
+        IsTextureValid(idleTexture) &&
+        IsTextureValid(runTexture) &&
+        IsTextureValid(jumpTexture) &&
+        IsTextureValid(swordTexture);
+
+    if (!playerTexturesValid || !ZombieAssetsAreValid(&zombieAssets))
+    {
         TraceLog(LOG_ERROR, "One or more required textures failed to load.");
+
         if (IsTextureValid(background)) UnloadTexture(background);
         if (IsTextureValid(idleTexture)) UnloadTexture(idleTexture);
         if (IsTextureValid(runTexture)) UnloadTexture(runTexture);
         if (IsTextureValid(jumpTexture)) UnloadTexture(jumpTexture);
         if (IsTextureValid(swordTexture)) UnloadTexture(swordTexture);
+        UnloadZombieAssets(&zombieAssets);
+
         CloseAudioDevice();
         CloseWindow();
         return 1;
     }
 
-    /*
-       The complete game is rendered at a fixed virtual resolution.
-       It is then scaled to the real monitor size without stretching.
-    */
+    if (!ZombieAssetLayoutIsValid(&zombieAssets))
+    {
+        TraceLog(
+            LOG_ERROR,
+            "Zombie sheets must use equal square cells with one shared cell size: idle/walk/attack/death 8 frames, hurt 4 frames, victory 6 frames."
+        );
+
+        UnloadTexture(background);
+        UnloadTexture(idleTexture);
+        UnloadTexture(runTexture);
+        UnloadTexture(jumpTexture);
+        UnloadTexture(swordTexture);
+        UnloadZombieAssets(&zombieAssets);
+        CloseAudioDevice();
+        CloseWindow();
+        return 1;
+    }
+
+    SetTextureFilter(zombieAssets.idle, TEXTURE_FILTER_BILINEAR);
+    SetTextureFilter(zombieAssets.walk, TEXTURE_FILTER_BILINEAR);
+    SetTextureFilter(zombieAssets.attack, TEXTURE_FILTER_BILINEAR);
+    SetTextureFilter(zombieAssets.hurt, TEXTURE_FILTER_BILINEAR);
+    SetTextureFilter(zombieAssets.death, TEXTURE_FILTER_BILINEAR);
+    SetTextureFilter(zombieAssets.victory, TEXTURE_FILTER_BILINEAR);
+
     RenderTexture2D gameTarget = LoadRenderTexture(SCREEN_WIDTH, SCREEN_HEIGHT);
     SetTextureFilter(gameTarget.texture, TEXTURE_FILTER_BILINEAR);
 
-    Rectangle backgroundSource = {0, 0, (float)background.width, (float)background.height};
-    Rectangle backgroundDestination = {0, 0, SCREEN_WIDTH, SCREEN_HEIGHT};
+    Rectangle backgroundSource = {
+        0.0f,
+        0.0f,
+        (float)background.width,
+        (float)background.height
+    };
+
+    Rectangle backgroundDestination = {
+        0.0f,
+        0.0f,
+        (float)SCREEN_WIDTH,
+        (float)SCREEN_HEIGHT
+    };
 
     const int idleFrames = 8;
     const int runFrames = 8;
     const int jumpFrames = 6;
     const int swordFrames = 8;
 
-    const float idleFrameWidth = (float)idleTexture.width / idleFrames;
-    const float runFrameWidth = (float)runTexture.width / runFrames;
-    const float jumpFrameWidth = (float)jumpTexture.width / jumpFrames;
-    const float swordFrameWidth = (float)swordTexture.width / swordFrames;
+    const float idleFrameWidth = (float)idleTexture.width / (float)idleFrames;
+    const float runFrameWidth = (float)runTexture.width / (float)runFrames;
+    const float jumpFrameWidth = (float)jumpTexture.width / (float)jumpFrames;
+    const float swordFrameWidth = (float)swordTexture.width / (float)swordFrames;
 
     int currentFrame = 0;
     float frameTimer = 0.0f;
@@ -206,15 +612,18 @@ int main(void)
 
     const float groundSpeed = 220.0f;
     const float sprintSpeed = 340.0f;
-    const float airSpeed = 390.0f;
-    const float sprintAirSpeed = 470.0f;
-    const float jumpForce = -800.0f;
+    const float airSpeed = 440.0f;
+    const float sprintAirSpeed = 535.0f;
+    const float jumpForce = -910.0f;
     const float gravity = 2000.0f;
 
     int playerHealth = PLAYER_MAX_HEALTH;
-    bool isRunning = false, wasRunning = false;
-    bool isSprinting = false, wasSprinting = false;
-    bool isJumping = false, wasJumping = false;
+    bool isRunning = false;
+    bool wasRunning = false;
+    bool isSprinting = false;
+    bool wasSprinting = false;
+    bool isJumping = false;
+    bool wasJumping = false;
     bool isSprintJump = false;
     bool isAttacking = false;
     bool facingRight = true;
@@ -222,7 +631,6 @@ int main(void)
     bool enemyHitThisAttack = false;
     bool showHitboxes = false;
 
-    /* Three-hit combo system */
     int comboAttackCount = 0;
     float comboResetTimer = 0.0f;
     bool isSpecialAttack = false;
@@ -231,8 +639,16 @@ int main(void)
     float cameraShakeTimer = 0.0f;
     float impactFlashTimer = 0.0f;
 
+    float playerStandingDrawHeight = (float)idleTexture.height * 0.52f;
     LevelEnemyConfig levelConfig = GetLevelEnemyConfig(CURRENT_LEVEL);
-    DummyEnemy enemy = CreateDummyEnemy(760.0f, groundY, levelConfig);
+
+    ZombieEnemy enemy = CreateZombieEnemy(
+        760.0f,
+        groundY,
+        playerStandingDrawHeight,
+        (float)zombieAssets.idle.height,
+        levelConfig
+    );
 
     GameState gameState = GAME_PLAYING;
     float resultTimer = 0.0f;
@@ -251,7 +667,8 @@ int main(void)
     Camera2D camera = {0};
     camera.zoom = 1.0f;
 
-    while (!WindowShouldClose()) {
+    while (!WindowShouldClose())
+    {
         float dt = GetFrameTime();
 
         if (level1AmbienceReady)
@@ -262,7 +679,7 @@ int main(void)
         if (gameState == GAME_PLAYING && !ambienceStarted)
         {
             levelIntroTimer += dt;
-            
+
             if (levelIntroTimer >= 1.35f && level1AmbienceReady)
             {
                 PlayMusicStream(level1Ambience);
@@ -271,7 +688,6 @@ int main(void)
         }
 
         float previousPlayerX = playerX;
-
         isRunning = false;
         isSprinting = false;
 
@@ -295,14 +711,11 @@ int main(void)
         bool moveLeft = IsKeyDown(KEY_LEFT);
         bool movementKeyDown = moveRight || moveLeft;
 
-        if (IsKeyPressed(KEY_F11))
-        {
-            ToggleBorderlessWindowed();
-        }
-
+        if (IsKeyPressed(KEY_F11)) ToggleBorderlessWindowed();
         if (IsKeyPressed(KEY_F1)) showHitboxes = !showHitboxes;
 
-        if (IsKeyPressed(KEY_R)) {
+        if (IsKeyPressed(KEY_R))
+        {
             playerHealth = PLAYER_MAX_HEALTH;
             playerX = 200.0f;
             playerFeetY = groundY;
@@ -314,21 +727,24 @@ int main(void)
             isSpecialAttack = false;
             currentFrame = 0;
             frameTimer = 0.0f;
-            enemy = CreateDummyEnemy(760.0f, groundY, levelConfig);
+
+            enemy = CreateZombieEnemy(
+                760.0f,
+                groundY,
+                playerStandingDrawHeight,
+                (float)zombieAssets.idle.height,
+                levelConfig
+            );
 
             gameState = GAME_PLAYING;
             resultTimer = 0.0f;
             successfulHits = 0;
             victorySoundPlayed = false;
             defeatSoundPlayed = false;
-
             levelIntroTimer = 0.0f;
             ambienceStarted = false;
 
-            if (level1AmbienceReady)
-            {
-                StopMusicStream(level1Ambience);
-            }
+            if (level1AmbienceReady) StopMusicStream(level1Ambience);
 
             if (level1IntroSoundReady)
             {
@@ -337,7 +753,14 @@ int main(void)
             }
         }
 
-        if (gameState == GAME_PLAYING && IsKeyPressed(KEY_SPACE) && !isAttacking && !isJumping && playerHealth > 0) {
+        if (
+            gameState == GAME_PLAYING &&
+            IsKeyPressed(KEY_SPACE) &&
+            !isAttacking &&
+            !isJumping &&
+            playerHealth > 0
+        )
+        {
             comboAttackCount++;
 
             if (comboAttackCount >= COMBO_REQUIRED_ATTACKS)
@@ -359,26 +782,30 @@ int main(void)
 
             if (swordSwingSoundReady)
             {
-                SetSoundPitch(
-                    swordSwingSound,
-                    isSpecialAttack ? 0.94f : 1.00f
-                );
+                SetSoundPitch(swordSwingSound, isSpecialAttack ? 0.94f : 1.00f);
                 PlaySound(swordSwingSound);
             }
         }
 
-        if (gameState == GAME_PLAYING && IsKeyPressed(KEY_UP) && !isJumping && !isAttacking && playerHealth > 0) {
+        if (
+            gameState == GAME_PLAYING &&
+            IsKeyPressed(KEY_UP) &&
+            !isJumping &&
+            !isAttacking &&
+            playerHealth > 0
+        )
+        {
             isSprintJump = shiftDown && movementKeyDown;
             verticalVelocity = jumpForce;
             isJumping = true;
 
             if (moveRight && !moveLeft)
             {
-                playerX += isSprintJump ? 34.0f : 22.0f;
+                playerX += isSprintJump ? 48.0f : 32.0f;
             }
             else if (moveLeft && !moveRight)
             {
-                playerX -= isSprintJump ? 34.0f : 22.0f;
+                playerX -= isSprintJump ? 48.0f : 32.0f;
             }
 
             currentFrame = 0;
@@ -386,20 +813,31 @@ int main(void)
         }
 
         float horizontalSpeed;
-        if (isJumping) horizontalSpeed = isSprintJump ? sprintAirSpeed : airSpeed;
-        else if (shiftDown && movementKeyDown) {
+
+        if (isJumping)
+        {
+            horizontalSpeed = isSprintJump ? sprintAirSpeed : airSpeed;
+        }
+        else if (shiftDown && movementKeyDown)
+        {
             horizontalSpeed = sprintSpeed;
             isSprinting = true;
-        } else horizontalSpeed = groundSpeed;
+        }
+        else
+        {
+            horizontalSpeed = groundSpeed;
+        }
 
-        if (gameState == GAME_PLAYING &&
-            !isAttacking &&
-            playerHealth > 0) {
-            if (moveRight && !moveLeft) {
+        if (gameState == GAME_PLAYING && !isAttacking && playerHealth > 0)
+        {
+            if (moveRight && !moveLeft)
+            {
                 playerX += horizontalSpeed * dt;
                 isRunning = true;
                 facingRight = true;
-            } else if (moveLeft && !moveRight) {
+            }
+            else if (moveLeft && !moveRight)
+            {
                 playerX -= horizontalSpeed * dt;
                 isRunning = true;
                 facingRight = false;
@@ -407,12 +845,19 @@ int main(void)
         }
 
         if (isJumping) isSprinting = false;
-        if (isJumping && IsKeyReleased(KEY_UP) && verticalVelocity < -200.0f) verticalVelocity *= 0.55f;
 
-        if (isJumping) {
+        if (isJumping && IsKeyReleased(KEY_UP) && verticalVelocity < -200.0f)
+        {
+            verticalVelocity *= 0.55f;
+        }
+
+        if (isJumping)
+        {
             verticalVelocity += gravity * dt;
             playerFeetY += verticalVelocity * dt;
-            if (playerFeetY >= groundY && verticalVelocity > 0.0f) {
+
+            if (playerFeetY >= groundY && verticalVelocity > 0.0f)
+            {
                 playerFeetY = groundY;
                 verticalVelocity = 0.0f;
                 isJumping = false;
@@ -420,34 +865,48 @@ int main(void)
                 currentFrame = 0;
                 frameTimer = 0.0f;
             }
-        } else playerFeetY = groundY;
+        }
+        else
+        {
+            playerFeetY = groundY;
+        }
 
         Texture2D currentTexture;
-        float currentFrameWidth, currentFrameHeight, drawScale, frameDuration;
+        float currentFrameWidth;
+        float currentFrameHeight;
+        float drawScale;
+        float frameDuration;
         int totalFrames;
 
-        if (isAttacking) {
+        if (isAttacking)
+        {
             currentTexture = swordTexture;
             currentFrameWidth = swordFrameWidth;
             currentFrameHeight = (float)swordTexture.height;
             drawScale = 0.62f;
             totalFrames = swordFrames;
             frameDuration = 0.08f;
-        } else if (isJumping) {
+        }
+        else if (isJumping)
+        {
             currentTexture = jumpTexture;
             currentFrameWidth = jumpFrameWidth;
             currentFrameHeight = (float)jumpTexture.height;
             drawScale = 0.52f;
             totalFrames = jumpFrames;
             frameDuration = 0.10f;
-        } else if (isRunning) {
+        }
+        else if (isRunning)
+        {
             currentTexture = runTexture;
             currentFrameWidth = runFrameWidth;
             currentFrameHeight = (float)runTexture.height;
             drawScale = 0.72f;
             totalFrames = runFrames;
             frameDuration = isSprinting ? 0.075f : 0.12f;
-        } else {
+        }
+        else
+        {
             currentTexture = idleTexture;
             currentFrameWidth = idleFrameWidth;
             currentFrameHeight = (float)idleTexture.height;
@@ -461,55 +920,81 @@ int main(void)
         float visualOffsetY = isAttacking ? 60.0f : 0.0f;
         float playerDrawY = playerFeetY - playerDrawHeight + visualOffsetY;
 
-        if (!isAttacking && (isJumping != wasJumping || (!isJumping && isRunning != wasRunning) ||
-            (!isJumping && isSprinting != wasSprinting))) {
+        if (
+            !isAttacking &&
+            (
+                isJumping != wasJumping ||
+                (!isJumping && isRunning != wasRunning) ||
+                (!isJumping && isSprinting != wasSprinting)
+            )
+        )
+        {
             currentFrame = 0;
             frameTimer = 0.0f;
         }
+
         wasJumping = isJumping;
         wasRunning = isRunning;
         wasSprinting = isSprinting;
 
-        if (isAttacking) {
-            float attackFrameDuration = currentFrame <= 1 ? 0.09f :
-                currentFrame <= 3 ? 0.055f : currentFrame == 4 ? 0.14f : 0.08f;
+        if (isAttacking)
+        {
+            float attackFrameDuration = currentFrame <= 1
+                ? 0.09f
+                : (currentFrame <= 3
+                    ? 0.055f
+                    : (currentFrame == 4 ? 0.14f : 0.08f));
+
             frameTimer += dt;
-            if (frameTimer >= attackFrameDuration) {
+
+            if (frameTimer >= attackFrameDuration)
+            {
                 frameTimer = 0.0f;
                 currentFrame++;
-                if (currentFrame == 3 && !attackLungeApplied) {
+
+                if (currentFrame == 3 && !attackLungeApplied)
+                {
                     float lungeDistance = isSpecialAttack ? 42.0f : 24.0f;
                     playerX += facingRight ? lungeDistance : -lungeDistance;
                     attackLungeApplied = true;
                 }
-                if (currentFrame == 4) {
+
+                if (currentFrame == 4)
+                {
                     cameraShakeTimer = isSpecialAttack ? 0.16f : 0.08f;
                     impactFlashTimer = isSpecialAttack ? 0.10f : 0.05f;
                 }
-                if (currentFrame >= swordFrames) {
+
+                if (currentFrame >= swordFrames)
+                {
                     isAttacking = false;
                     currentFrame = 0;
                     frameTimer = 0.0f;
                     attackLungeApplied = false;
                 }
             }
-        } else if (isJumping) {
+        }
+        else if (isJumping)
+        {
             if (verticalVelocity < -350.0f) currentFrame = 0;
             else if (verticalVelocity < -120.0f) currentFrame = 1;
             else if (verticalVelocity < 120.0f) currentFrame = 2;
             else if (verticalVelocity < 350.0f) currentFrame = 3;
             else if (verticalVelocity < 550.0f) currentFrame = 4;
             else currentFrame = 5;
-        } else {
+        }
+        else
+        {
             frameTimer += dt;
-            if (frameTimer >= frameDuration) {
+
+            if (frameTimer >= frameDuration)
+            {
                 frameTimer = 0.0f;
                 currentFrame = (currentFrame + 1) % totalFrames;
             }
         }
 
-        if (playerX < 0.0f) playerX = 0.0f;
-        if (playerX + playerDrawWidth > SCREEN_WIDTH) playerX = SCREEN_WIDTH - playerDrawWidth;
+        playerX = ClampFloat(playerX, 0.0f, (float)SCREEN_WIDTH - playerDrawWidth);
 
         Rectangle playerBody = {
             playerX + playerDrawWidth * 0.30f,
@@ -518,64 +1003,33 @@ int main(void)
             playerDrawHeight * 0.77f
         };
 
-        float playerBottomY =
-            playerBody.y + playerBody.height;
+        float playerBottomY = playerBody.y + playerBody.height;
+        float enemyTopY = enemy.body.y;
+        bool playerIsAboveEnemy = playerBottomY < enemyTopY + 50.0f;
 
-        float enemyTopY =
-            enemy.body.y;
-
-        bool playerIsAboveEnemy =
-            playerBottomY <
-            enemyTopY + 50.0f;
-
-        if (gameState == GAME_PLAYING &&
+        if (
+            gameState == GAME_PLAYING &&
             enemy.active &&
-            enemy.state != ENEMY_DEAD &&
+            enemy.state != ENEMY_DYING &&
             !playerIsAboveEnemy &&
-            CheckCollisionRecs(playerBody, enemy.body))
+            CheckCollisionRecs(playerBody, enemy.body)
+        )
         {
-            float previousBodyX =
-                previousPlayerX +
-                playerDrawWidth * 0.30f;
-
-            float previousBodyCenterX =
-                previousBodyX +
-                playerBody.width * 0.50f;
-
-            float enemyCenterX =
-                enemy.body.x +
-                enemy.body.width * 0.50f;
+            float previousBodyX = previousPlayerX + playerDrawWidth * 0.30f;
+            float previousBodyCenterX = previousBodyX + playerBody.width * 0.5f;
+            float enemyCenterX = enemy.body.x + enemy.body.width * 0.5f;
 
             if (previousBodyCenterX <= enemyCenterX)
             {
-                playerX =
-                    enemy.body.x -
-                    playerBody.width -
-                    playerDrawWidth * 0.30f;
+                playerX = enemy.body.x - playerBody.width - playerDrawWidth * 0.30f;
             }
             else
             {
-                playerX =
-                    enemy.body.x +
-                    enemy.body.width -
-                    playerDrawWidth * 0.30f;
+                playerX = enemy.body.x + enemy.body.width - playerDrawWidth * 0.30f;
             }
 
-            if (playerX < 0.0f)
-            {
-                playerX = 0.0f;
-            }
-
-            if (playerX + playerDrawWidth > SCREEN_WIDTH)
-            {
-                playerX =
-                    SCREEN_WIDTH -
-                    playerDrawWidth;
-            }
-
-            playerBody.x =
-                playerX +
-                playerDrawWidth * 0.30f;
+            playerX = ClampFloat(playerX, 0.0f, (float)SCREEN_WIDTH - playerDrawWidth);
+            playerBody.x = playerX + playerDrawWidth * 0.30f;
         }
 
         bool playerAttackActive =
@@ -583,85 +1037,138 @@ int main(void)
             isAttacking &&
             currentFrame >= 3 &&
             currentFrame <= 5;
+
         float playerAttackWidth = isSpecialAttack ? 145.0f : 100.0f;
         float playerAttackHeight = isSpecialAttack ? 100.0f : 82.0f;
+
         Rectangle playerAttackBox = {
             0.0f,
             playerDrawY + playerDrawHeight * 0.30f,
             playerAttackWidth,
             playerAttackHeight
         };
+
         playerAttackBox.x = facingRight
             ? playerX + playerDrawWidth * 0.58f
             : playerX - playerAttackBox.width * 0.62f;
 
-        if (gameState == GAME_PLAYING &&
-            enemy.active) {
+        if (gameState == GAME_PLAYING && enemy.active)
+        {
             float playerCenterX = playerBody.x + playerBody.width * 0.5f;
             float enemyCenterX = enemy.body.x + enemy.body.width * 0.5f;
             float distance = fabsf(playerCenterX - enemyCenterX);
             enemy.facingRight = playerCenterX > enemyCenterX;
 
-            if (enemy.state == ENEMY_DEAD) {
+            if (enemy.state == ENEMY_DYING)
+            {
                 enemy.deathTimer += dt;
-                if (enemy.deathTimer >= 1.0f) enemy.active = false;
-            } else if (enemy.state == ENEMY_HURT) {
-                enemy.hurtTimer -= dt;
-                if (enemy.hurtTimer <= 0.0f) enemy.state = ENEMY_IDLE;
-            } else if (enemy.state == ENEMY_ATTACKING) {
+                int deathFrame = (int)(enemy.deathTimer / 0.105f);
+
+                if (deathFrame >= ZOMBIE_DEATH_FRAMES)
+                {
+                    enemy.animationFrame = ZOMBIE_DEATH_FRAMES - 1;
+                }
+                else
+                {
+                    enemy.animationFrame = deathFrame;
+                }
+
+                if (enemy.deathTimer >= 1.30f)
+                {
+                    enemy.active = false;
+                }
+            }
+            else if (enemy.state == ENEMY_HURT)
+            {
+                enemy.hurtTimer += dt;
+                int hurtFrame = (int)(enemy.hurtTimer / 0.07f);
+
+                if (hurtFrame >= ZOMBIE_HURT_FRAMES)
+                {
+                    SetEnemyState(&enemy, ENEMY_IDLE);
+                }
+                else
+                {
+                    enemy.animationFrame = hurtFrame;
+                }
+            }
+            else if (enemy.state == ENEMY_ATTACKING)
+            {
                 enemy.attackTimer += dt;
                 enemy.attackBox = GetEnemyAttackBox(&enemy);
-                if (enemy.attackTimer >= enemy.attackWindup &&
-                    !enemy.damageApplied) {
 
-                    if (enemyPushSoundReady)
-                    {
-                        PlaySound(enemyPushSound);
-                    }
+                float attackTotalDuration = enemy.attackWindup + 0.34f;
+                float progress = ClampFloat(enemy.attackTimer / attackTotalDuration, 0.0f, 0.9999f);
+                enemy.animationFrame = (int)(progress * (float)ZOMBIE_ATTACK_FRAMES);
 
-                    if (!playerIsAboveEnemy &&
+                if (enemy.attackTimer >= enemy.attackWindup && !enemy.damageApplied)
+                {
+                    if (enemyPushSoundReady) PlaySound(enemyPushSound);
+
+                    if (
+                        !playerIsAboveEnemy &&
                         CheckCollisionRecs(enemy.attackBox, playerBody) &&
                         playerInvulnerabilityTimer <= 0.0f &&
-                        playerHealth > 0) {
+                        playerHealth > 0
+                    )
+                    {
                         playerHealth -= enemy.damage;
                         if (playerHealth < 0) playerHealth = 0;
+
                         playerInvulnerabilityTimer = 0.80f;
                         cameraShakeTimer = 0.10f;
+                        impactFlashTimer = 0.06f;
 
-                        if (playerHitSoundReady)
-                        {
-                            PlaySound(playerHitSound);
-                        }
+                        if (playerHitSoundReady) PlaySound(playerHitSound);
                     }
+
                     enemy.damageApplied = true;
                 }
-                if (enemy.attackTimer >= enemy.attackWindup + 0.32f) {
-                    enemy.state = ENEMY_IDLE;
-                    enemy.attackTimer = 0.0f;
-                    enemy.damageApplied = false;
+
+                if (enemy.attackTimer >= attackTotalDuration)
+                {
+                    SetEnemyState(&enemy, ENEMY_IDLE);
                     enemy.attackCooldownTimer = enemy.attackCooldown;
                 }
-            } else {
-                if (!playerIsAboveEnemy &&
+            }
+            else
+            {
+                if (
+                    !playerIsAboveEnemy &&
                     distance <= enemy.attackRange &&
                     enemy.attackCooldownTimer <= 0.0f &&
-                    playerHealth > 0) {
-                    enemy.state = ENEMY_ATTACKING;
-                    enemy.attackTimer = 0.0f;
-                    enemy.damageApplied = false;
+                    playerHealth > 0
+                )
+                {
+                    SetEnemyState(&enemy, ENEMY_ATTACKING);
+                    enemy.attackBox = GetEnemyAttackBox(&enemy);
 
-                    if (enemyTelegraphSoundReady)
-                    {
-                        PlaySound(enemyTelegraphSound);
-                    }
-                } else if (distance <= enemy.detectionRange && distance > enemy.attackRange && playerHealth > 0) {
-                    enemy.state = ENEMY_CHASING;
+                    if (enemyTelegraphSoundReady) PlaySound(enemyTelegraphSound);
+                }
+                else if (
+                    distance <= enemy.detectionRange &&
+                    distance > enemy.attackRange &&
+                    playerHealth > 0
+                )
+                {
+                    SetEnemyState(&enemy, ENEMY_CHASING);
                     enemy.body.x += (enemy.facingRight ? 1.0f : -1.0f) * enemy.moveSpeed * dt;
-                } else enemy.state = ENEMY_IDLE;
+                    AdvanceLoopingAnimation(&enemy, ZOMBIE_WALK_FRAMES, 0.105f, dt);
+                }
+                else
+                {
+                    SetEnemyState(&enemy, ENEMY_IDLE);
+                    AdvanceLoopingAnimation(&enemy, ZOMBIE_IDLE_FRAMES, 0.145f, dt);
+                }
             }
 
-            if (playerAttackActive && !enemyHitThisAttack && enemy.state != ENEMY_DEAD &&
-                CheckCollisionRecs(playerAttackBox, enemy.body)) {
+            if (
+                playerAttackActive &&
+                !enemyHitThisAttack &&
+                enemy.state != ENEMY_DYING &&
+                CheckCollisionRecs(playerAttackBox, enemy.body)
+            )
+            {
                 int attackDamage = isSpecialAttack
                     ? PLAYER_SPECIAL_DAMAGE
                     : PLAYER_SWORD_DAMAGE;
@@ -675,61 +1182,48 @@ int main(void)
                 successfulHits++;
                 enemyHitThisAttack = true;
                 cameraShakeTimer = 0.10f;
+                impactFlashTimer = isSpecialAttack ? 0.10f : 0.06f;
 
                 if (swordHitSoundReady)
                 {
-                    SetSoundPitch(
-                        swordHitSound,
-                        isSpecialAttack ? 0.90f : 1.00f
-                    );
+                    SetSoundPitch(swordHitSound, isSpecialAttack ? 0.90f : 1.00f);
                     PlaySound(swordHitSound);
                 }
             }
 
-            if (enemy.body.x < 0.0f) enemy.body.x = 0.0f;
-            if (enemy.body.x + enemy.body.width > SCREEN_WIDTH) enemy.body.x = SCREEN_WIDTH - enemy.body.width;
+            enemy.body.x = ClampFloat(
+                enemy.body.x,
+                0.0f,
+                (float)SCREEN_WIDTH - enemy.body.width
+            );
         }
 
-        if (gameState == GAME_PLAYING &&
+        if (
+            gameState == GAME_PLAYING &&
             enemy.active &&
-            enemy.state != ENEMY_DEAD &&
+            enemy.state != ENEMY_DYING &&
             !playerIsAboveEnemy &&
-            CheckCollisionRecs(playerBody, enemy.body))
+            CheckCollisionRecs(playerBody, enemy.body)
+        )
         {
-            float playerCenterX =
-                playerBody.x +
-                playerBody.width * 0.50f;
-
-            float enemyCenterX =
-                enemy.body.x +
-                enemy.body.width * 0.50f;
+            float playerCenterX = playerBody.x + playerBody.width * 0.5f;
+            float enemyCenterX = enemy.body.x + enemy.body.width * 0.5f;
 
             if (enemyCenterX >= playerCenterX)
             {
-                enemy.body.x =
-                    playerBody.x +
-                    playerBody.width;
+                enemy.body.x = playerBody.x + playerBody.width;
             }
             else
             {
-                enemy.body.x =
-                    playerBody.x -
-                    enemy.body.width;
+                enemy.body.x = playerBody.x - enemy.body.width;
             }
 
-            if (enemy.body.x < 0.0f)
-            {
-                enemy.body.x = 0.0f;
-            }
-
-            if (enemy.body.x + enemy.body.width > SCREEN_WIDTH)
-            {
-                enemy.body.x =
-                    SCREEN_WIDTH -
-                    enemy.body.width;
-            }
+            enemy.body.x = ClampFloat(
+                enemy.body.x,
+                0.0f,
+                (float)SCREEN_WIDTH - enemy.body.width
+            );
         }
-
 
         if (gameState == GAME_PLAYING)
         {
@@ -737,21 +1231,16 @@ int main(void)
             {
                 gameState = GAME_DEFEAT;
                 resultTimer = 0.0f;
-
                 isAttacking = false;
                 isRunning = false;
                 isSprinting = false;
 
-                if (enemy.active &&
-                    enemy.state != ENEMY_DEAD)
+                if (enemy.active && enemy.state != ENEMY_DYING)
                 {
-                    enemy.state = ENEMY_IDLE;
+                    SetEnemyState(&enemy, ENEMY_VICTORY);
                 }
 
-                if (level1AmbienceReady)
-                {
-                    StopMusicStream(level1Ambience);
-                }
+                if (level1AmbienceReady) StopMusicStream(level1Ambience);
 
                 if (!defeatSoundPlayed && defeatSoundReady)
                 {
@@ -763,15 +1252,11 @@ int main(void)
             {
                 gameState = GAME_VICTORY;
                 resultTimer = 0.0f;
-
                 isAttacking = false;
                 isRunning = false;
                 isSprinting = false;
 
-                if (level1AmbienceReady)
-                {
-                    StopMusicStream(level1Ambience);
-                }
+                if (level1AmbienceReady) StopMusicStream(level1Ambience);
 
                 if (!victorySoundPlayed && victorySoundReady)
                 {
@@ -783,17 +1268,37 @@ int main(void)
         else
         {
             resultTimer += dt;
+
+            if (gameState == GAME_DEFEAT && enemy.active)
+            {
+                AdvanceLoopingAnimation(&enemy, ZOMBIE_VICTORY_FRAMES, 0.14f, dt);
+            }
         }
 
-        if (cameraShakeTimer > 0.0f) {
+        if (cameraShakeTimer > 0.0f)
+        {
             cameraShakeTimer -= dt;
             camera.offset.x = (float)GetRandomValue(-2, 2);
             camera.offset.y = (float)GetRandomValue(-2, 2);
-        } else camera.offset = (Vector2){0.0f, 0.0f};
+        }
+        else
+        {
+            camera.offset = (Vector2){0.0f, 0.0f};
+        }
 
         Rectangle sourceRectangle = facingRight
-            ? (Rectangle){currentFrame * currentFrameWidth, 0.0f, currentFrameWidth, currentFrameHeight}
-            : (Rectangle){(currentFrame + 1) * currentFrameWidth, 0.0f, -currentFrameWidth, currentFrameHeight};
+            ? (Rectangle){
+                currentFrame * currentFrameWidth,
+                0.0f,
+                currentFrameWidth,
+                currentFrameHeight
+            }
+            : (Rectangle){
+                (currentFrame + 1) * currentFrameWidth,
+                0.0f,
+                -currentFrameWidth,
+                currentFrameHeight
+            };
 
         Rectangle destinationRectangle = {
             playerX,
@@ -804,63 +1309,40 @@ int main(void)
 
         if (gameState == GAME_VICTORY)
         {
-            destinationRectangle.y -=
-                fabsf(sinf(resultTimer * 4.2f)) *
-                9.0f;
+            destinationRectangle.y -= fabsf(sinf(resultTimer * 4.2f)) * 9.0f;
         }
 
-        /* Draw the game to the fixed 1000 x 600 virtual canvas. */
         BeginTextureMode(gameTarget);
         ClearBackground(BLACK);
         BeginMode2D(camera);
 
-        DrawTexturePro(background, backgroundSource, backgroundDestination, (Vector2){0}, 0.0f, WHITE);
+        DrawTexturePro(
+            background,
+            backgroundSource,
+            backgroundDestination,
+            (Vector2){0.0f, 0.0f},
+            0.0f,
+            WHITE
+        );
 
-        if (enemy.active) {
-            Color enemyColor = MAROON;
-            if (enemy.state == ENEMY_CHASING) enemyColor = RED;
-            else if (enemy.state == ENEMY_ATTACKING) enemyColor = ORANGE;
-            else if (enemy.state == ENEMY_HURT) enemyColor = YELLOW;
-            else if (enemy.state == ENEMY_DEAD) enemyColor = Fade(DARKGRAY, 0.70f);
+        if (isSprinting)
+        {
+            float dustX = facingRight
+                ? playerX + playerDrawWidth * 0.20f
+                : playerX + playerDrawWidth * 0.80f;
 
-            DrawRectangleRounded(enemy.body, 0.16f, 8, enemyColor);
-            DrawRectangleLinesEx(enemy.body, 3.0f, BLACK);
-            DrawCircle((int)(enemy.body.x + 17.0f), (int)(enemy.body.y + 27.0f), 5.0f, BLACK);
-            DrawCircle((int)(enemy.body.x + 41.0f), (int)(enemy.body.y + 27.0f), 5.0f, BLACK);
-            const char *enemyFaceText =
-                gameState == GAME_DEFEAT
-                ? "WIN"
-                : (enemy.state == ENEMY_ATTACKING ? "!" : "Z");
-
-            DrawText(
-                enemyFaceText,
-                (int)(enemy.body.x +
-                    (gameState == GAME_DEFEAT ? 7.0f : 22.0f)),
-                (int)(enemy.body.y + 48.0f),
-                gameState == GAME_DEFEAT ? 16 : 22,
-                BLACK
+            DrawCircle(
+                (int)dustX,
+                (int)(playerFeetY - 4.0f),
+                9.0f,
+                Fade(LIGHTGRAY, 0.28f)
             );
-
-            float healthRatio = (float)enemy.health / (float)enemy.maxHealth;
-            Rectangle barBack = {enemy.body.x - 4.0f, enemy.body.y - 15.0f, enemy.body.width + 8.0f, 8.0f};
-            Rectangle barFill = {barBack.x, barBack.y, barBack.width * healthRatio, barBack.height};
-            DrawRectangleRec(barBack, Fade(BLACK, 0.75f));
-            DrawRectangleRec(barFill, LIME);
-
-            if (enemy.state == ENEMY_ATTACKING)
-            {
-                enemy.attackBox =
-                    GetEnemyAttackBox(&enemy);
-            }
         }
 
-        if (isSprinting) {
-            float dustX = facingRight ? playerX + playerDrawWidth * 0.20f : playerX + playerDrawWidth * 0.80f;
-            DrawCircle((int)dustX, (int)(playerFeetY - 4.0f), 9.0f, Fade(LIGHTGRAY, 0.28f));
-        }
+        if (playerAttackActive)
+        {
+            float direction = facingRight ? 1.0f : -1.0f;
 
-        if (playerAttackActive) {
-            float dir = facingRight ? 1.0f : -1.0f;
             Vector2 slashStart = {
                 playerX + playerDrawWidth * 0.52f,
                 playerDrawY + playerDrawHeight * 0.48f
@@ -869,15 +1351,17 @@ int main(void)
             if (isSpecialAttack)
             {
                 Vector2 upper = {
-                    slashStart.x + 145.0f * dir,
+                    slashStart.x + 145.0f * direction,
                     slashStart.y - 45.0f
                 };
+
                 Vector2 middle = {
-                    slashStart.x + 165.0f * dir,
+                    slashStart.x + 165.0f * direction,
                     slashStart.y
                 };
+
                 Vector2 lower = {
-                    slashStart.x + 145.0f * dir,
+                    slashStart.x + 145.0f * direction,
                     slashStart.y + 45.0f
                 };
 
@@ -888,41 +1372,62 @@ int main(void)
             else
             {
                 Vector2 slashEnd = {
-                    slashStart.x + 105.0f * dir,
+                    slashStart.x + 105.0f * direction,
                     slashStart.y
                 };
+
                 DrawLineEx(slashStart, slashEnd, 7.0f, Fade(SKYBLUE, 0.50f));
             }
         }
 
         Color playerTint = WHITE;
-        if (playerInvulnerabilityTimer > 0.0f && ((int)(playerInvulnerabilityTimer * 18.0f) % 2 == 0))
+
+        if (
+            playerInvulnerabilityTimer > 0.0f &&
+            ((int)(playerInvulnerabilityTimer * 18.0f) % 2 == 0)
+        )
+        {
             playerTint = Fade(WHITE, 0.35f);
+        }
 
         DrawTexturePro(
             currentTexture,
             sourceRectangle,
             destinationRectangle,
-            (Vector2){0},
+            (Vector2){0.0f, 0.0f},
             0.0f,
             playerTint
         );
 
+        DrawZombieEnemy(&enemy, &zombieAssets, showHitboxes);
 
-        if (showHitboxes) {
+        if (showHitboxes)
+        {
             DrawRectangleLinesEx(playerBody, 2.0f, GREEN);
-            if (playerAttackActive) DrawRectangleLinesEx(playerAttackBox, 2.0f, SKYBLUE);
-            if (enemy.active) {
-                DrawRectangleLinesEx(enemy.body, 2.0f, RED);
-                if (enemy.state == ENEMY_ATTACKING) DrawRectangleLinesEx(enemy.attackBox, 2.0f, ORANGE);
+
+            if (playerAttackActive)
+            {
+                DrawRectangleLinesEx(playerAttackBox, 2.0f, SKYBLUE);
             }
         }
 
-        if (IsKeyDown(KEY_F2)) DrawLine(0, (int)groundY, SCREEN_WIDTH, (int)groundY, YELLOW);
+        if (IsKeyDown(KEY_F2))
+        {
+            DrawLine(0, (int)groundY, SCREEN_WIDTH, (int)groundY, YELLOW);
+        }
+
         EndMode2D();
 
         if (impactFlashTimer > 0.0f)
-            DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Fade(SKYBLUE, 0.08f));
+        {
+            DrawRectangle(
+                0,
+                0,
+                SCREEN_WIDTH,
+                SCREEN_HEIGHT,
+                Fade(SKYBLUE, 0.08f)
+            );
+        }
 
         DrawRectangle(0, 0, SCREEN_WIDTH, 118, Fade(BLACK, 0.68f));
         DrawText(TextFormat("IUT RED BOX  |  LEVEL %d", CURRENT_LEVEL), 24, 16, 28, WHITE);
@@ -942,8 +1447,15 @@ int main(void)
         );
 
         DrawText("PLAYER", 690, 18, 17, WHITE);
+
         Rectangle playerBarBack = {690.0f, 43.0f, 270.0f, 20.0f};
-        Rectangle playerBarFill = {690.0f, 43.0f, 270.0f * ((float)playerHealth / PLAYER_MAX_HEALTH), 20.0f};
+        Rectangle playerBarFill = {
+            690.0f,
+            43.0f,
+            270.0f * ((float)playerHealth / (float)PLAYER_MAX_HEALTH),
+            20.0f
+        };
+
         DrawRectangleRec(playerBarBack, DARKGRAY);
         DrawRectangleRec(playerBarFill, playerHealth > 30 ? LIME : RED);
         DrawRectangleLinesEx(playerBarBack, 2.0f, WHITE);
@@ -951,15 +1463,8 @@ int main(void)
 
         if (isSpecialAttack && isAttacking && playerAttackActive)
         {
-            DrawText(
-                "THIRD STRIKE!",
-                410,
-                145,
-                25,
-                GOLD
-            );
+            DrawText("THIRD STRIKE!", 410, 145, 25, GOLD);
         }
-
 
         if (gameState != GAME_PLAYING)
         {
@@ -971,134 +1476,39 @@ int main(void)
                 Fade(BLACK, 0.62f)
             );
 
-            Rectangle resultPanel = {
-                230.0f,
-                185.0f,
-                540.0f,
-                250.0f
-            };
+            Rectangle resultPanel = {230.0f, 185.0f, 540.0f, 250.0f};
+            Color accent = gameState == GAME_VICTORY ? LIME : RED;
 
-            Color accent =
-                gameState == GAME_VICTORY
-                ? LIME
-                : RED;
-
-            DrawRectangleRounded(
-                resultPanel,
-                0.08f,
-                12,
-                Fade(BLACK, 0.92f)
-            );
-
-            DrawRectangleLinesEx(
-                resultPanel,
-                3.0f,
-                accent
-            );
+            DrawRectangleRounded(resultPanel, 0.08f, 12, Fade(BLACK, 0.92f));
+            DrawRectangleLinesEx(resultPanel, 3.0f, accent);
 
             if (gameState == GAME_VICTORY)
             {
-                DrawText(
-                    "LEVEL 1 COMPLETE",
-                    330,
-                    215,
-                    34,
-                    LIME
-                );
-
-                DrawText(
-                    "Enemy defeated - area secured",
-                    357,
-                    260,
-                    21,
-                    RAYWHITE
-                );
-
-                DrawText(
-                    TextFormat(
-                        "Successful hits: %d",
-                        successfulHits
-                    ),
-                    390,
-                    305,
-                    20,
-                    LIGHTGRAY
-                );
-
-                DrawText(
-                    TextFormat(
-                        "Health remaining: %d",
-                        playerHealth
-                    ),
-                    388,
-                    335,
-                    20,
-                    LIGHTGRAY
-                );
-
-                DrawText(
-                    "VICTORY",
-                    435,
-                    375,
-                    26,
-                    GOLD
-                );
+                DrawText("LEVEL 1 COMPLETE", 330, 215, 34, LIME);
+                DrawText("Zombie Student defeated - area secured", 320, 260, 21, RAYWHITE);
+                DrawText(TextFormat("Successful hits: %d", successfulHits), 390, 305, 20, LIGHTGRAY);
+                DrawText(TextFormat("Health remaining: %d", playerHealth), 388, 335, 20, LIGHTGRAY);
+                DrawText("VICTORY", 435, 375, 26, GOLD);
             }
             else
             {
-                DrawText(
-                    "MISSION FAILED",
-                    357,
-                    215,
-                    34,
-                    RED
-                );
-
-                DrawText(
-                    "The enemy has defeated the player",
-                    330,
-                    260,
-                    21,
-                    RAYWHITE
-                );
-
-                DrawText(
-                    TextFormat(
-                        "Enemy health remaining: %d",
-                        enemy.health
-                    ),
-                    365,
-                    310,
-                    20,
-                    LIGHTGRAY
-                );
-
-                DrawText(
-                    "ENEMY WINS",
-                    408,
-                    355,
-                    27,
-                    ORANGE
-                );
+                DrawText("MISSION FAILED", 357, 215, 34, RED);
+                DrawText("The Zombie Student defeated the player", 317, 260, 21, RAYWHITE);
+                DrawText(TextFormat("Enemy health remaining: %d", enemy.health), 365, 310, 20, LIGHTGRAY);
+                DrawText("ENEMY WINS", 408, 355, 27, ORANGE);
             }
 
-            DrawText(
-                "Press R to restart Level 1",
-                365,
-                402,
-                18,
-                GRAY
-            );
+            DrawText("Press R to restart Level 1", 365, 402, 18, GRAY);
         }
 
         EndTextureMode();
 
-        /* Scale the virtual canvas to the current window/monitor size. */
         BeginDrawing();
         ClearBackground(BLACK);
 
         float realScreenWidth = (float)GetScreenWidth();
         float realScreenHeight = (float)GetScreenHeight();
+
         float screenScale = fminf(
             realScreenWidth / (float)SCREEN_WIDTH,
             realScreenHeight / (float)SCREEN_HEIGHT
@@ -1142,6 +1552,7 @@ int main(void)
     UnloadTexture(runTexture);
     UnloadTexture(jumpTexture);
     UnloadTexture(swordTexture);
+    UnloadZombieAssets(&zombieAssets);
 
     if (swordSwingSoundReady) UnloadSound(swordSwingSound);
     if (swordHitSoundReady) UnloadSound(swordHitSound);
