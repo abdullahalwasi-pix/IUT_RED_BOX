@@ -25,6 +25,7 @@ typedef struct
 
     int openingTextIndex;
     int tutorialStep;
+    int dialogueIndex;
 
     bool moved;
     bool jumped;

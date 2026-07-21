@@ -26,6 +26,85 @@ static bool TextureUsesEqualSquareFrames(
            texture.width == frameSize * frameCount;
 }
 
+static void AdvancePlayerLoopingAnimation(
+    Player *player,
+    float dt
+)
+{
+    player->frameTimer += dt;
+
+    /*
+       Keep the unspent time instead of resetting the timer.  This makes
+       idle/run playback stable when a frame takes longer than expected.
+    */
+    while (player->frameTimer >= player->frameDuration)
+    {
+        player->frameTimer -= player->frameDuration;
+        player->currentFrame =
+            (player->currentFrame + 1) %
+            player->totalFrames;
+    }
+}
+
+static void AdvancePlayerAttack(
+    Player *player,
+    float dt
+)
+{
+    player->frameTimer += dt;
+
+    while (player->isAttacking)
+    {
+        float frameDuration = player->currentFrame <= 1
+            ? 0.09f
+            : (
+                player->currentFrame <= 3
+                    ? 0.055f
+                    : (
+                        player->currentFrame == 4
+                            ? 0.14f
+                            : 0.08f
+                    )
+            );
+
+        if (player->frameTimer < frameDuration)
+        {
+            break;
+        }
+
+        player->frameTimer -= frameDuration;
+        player->currentFrame++;
+
+        if (
+            player->currentFrame == 3 &&
+            !player->attackLungeApplied
+        )
+        {
+            float lungeDistance =
+                player->specialAttack ? 42.0f : 24.0f;
+
+            player->x += player->facingRight
+                ? lungeDistance
+                : -lungeDistance;
+
+            player->attackLungeApplied = true;
+        }
+
+        if (player->currentFrame == 4)
+        {
+            player->attackImpactEvent = true;
+        }
+
+        if (player->currentFrame >= PLAYER_ATTACK_FRAMES)
+        {
+            player->isAttacking = false;
+            player->currentFrame = 0;
+            player->frameTimer = 0.0f;
+            player->attackLungeApplied = false;
+        }
+    }
+}
+
 static void SelectPlayerVisualState(
     Player *player,
     const PlayerAssets *assets,
@@ -554,53 +633,7 @@ void UpdatePlayer(
     }
     else if (player->isAttacking)
     {
-        float attackFrameDuration = player->currentFrame <= 1
-            ? 0.09f
-            : (
-                player->currentFrame <= 3
-                    ? 0.055f
-                    : (
-                        player->currentFrame == 4
-                            ? 0.14f
-                            : 0.08f
-                    )
-            );
-
-        player->frameTimer += dt;
-
-        if (player->frameTimer >= attackFrameDuration)
-        {
-            player->frameTimer = 0.0f;
-            player->currentFrame++;
-
-            if (
-                player->currentFrame == 3 &&
-                !player->attackLungeApplied
-            )
-            {
-                float lungeDistance =
-                    player->specialAttack ? 42.0f : 24.0f;
-
-                player->x += player->facingRight
-                    ? lungeDistance
-                    : -lungeDistance;
-
-                player->attackLungeApplied = true;
-            }
-
-            if (player->currentFrame == 4)
-            {
-                player->attackImpactEvent = true;
-            }
-
-            if (player->currentFrame >= PLAYER_ATTACK_FRAMES)
-            {
-                player->isAttacking = false;
-                player->currentFrame = 0;
-                player->frameTimer = 0.0f;
-                player->attackLungeApplied = false;
-            }
-        }
+        AdvancePlayerAttack(player, dt);
     }
     else if (player->isJumping)
     {
@@ -631,17 +664,14 @@ void UpdatePlayer(
     }
     else
     {
-        player->frameTimer += dt;
-
-        if (player->frameTimer >= player->frameDuration)
-        {
-            player->frameTimer = 0.0f;
-
-            player->currentFrame =
-                (player->currentFrame + 1) %
-                player->totalFrames;
-        }
+        AdvancePlayerLoopingAnimation(player, dt);
     }
+
+    /*
+       An attack can finish in the update above.  Refresh the selected
+       texture now so the final attack frame is never drawn as an idle frame.
+    */
+    SelectPlayerVisualState(player, assets, victoryMode);
 
     player->referenceDrawWidth =
         assets->idleFrameWidth * PLAYER_IDLE_SCALE;

@@ -15,7 +15,7 @@ echo.
 
 if exist main.exe del /F /Q main.exe
 
-"%GCC_PATH%" -o main.exe main.c game.c player.c enemy.c "%RAYLIB_PATH%\src\raylib.rc.data" -s -static -O3 -std=c99 -Wall -Wshadow -Wunused-parameter -I"..\include" -I"%RAYLIB_PATH%\src" -DPLATFORM_DESKTOP -L. -lraylib -lopengl32 -lgdi32 -lwinmm -lshcore
+"%GCC_PATH%" -o main.exe main.c game.c player.c enemy.c level1.c "%RAYLIB_PATH%\src\raylib.rc.data" -s -static -O3 -std=c99 -Wall -Wshadow -Wunused-parameter -I"..\include" -I"%RAYLIB_PATH%\src" -DPLATFORM_DESKTOP -L. -lraylib -lopengl32 -lgdi32 -lwinmm -lshcore
 
 if errorlevel 1 (
     echo.

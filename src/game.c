@@ -557,35 +557,14 @@ static void UpdateGameResult(Game *game, float dt)
             game->player.health > 0
         )
         {
+            /*
+               Do not finish Level 1 immediately.
+               Keep the zombie corpse visible and allow
+               the Level 1 post-fight dialogue to play.
+            */
             ForceZombieCorpse(
                 &game->enemy
             );
-
-            game->state = GAME_VICTORY;
-            game->resultTimer = 0.0f;
-
-            StartPlayerVictory(
-                &game->player
-            );
-
-            if (game->audio.level1AmbienceReady)
-            {
-                StopMusicStream(
-                    game->audio.level1Ambience
-                );
-            }
-
-            if (
-                !game->victorySoundPlayed &&
-                game->audio.victoryReady
-            )
-            {
-                PlaySound(
-                    game->audio.victory
-                );
-
-                game->victorySoundPlayed = true;
-            }
         }
     }
     else
@@ -1066,7 +1045,19 @@ void RestartGame(Game *game)
         return;
     }
 
+    /*
+       R restarts the playable part of Level 1.
+       The opening cinematic and area introduction are not replayed.
+    */
     ResetLevel1(&game->level1);
+    game->level1.state = LEVEL1_TUTORIAL;
+    game->level1.stateTimer = 0.0f;
+    game->level1.messageTimer = 0.0f;
+    game->level1.tutorialStep = 0;
+    game->level1.moved = false;
+    game->level1.jumped = false;
+    game->level1.attacked = false;
+    game->level1.enemyDefeated = false;
 
     ResetPlayer(
         &game->player,
