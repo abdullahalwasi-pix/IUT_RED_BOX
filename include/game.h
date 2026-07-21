@@ -4,6 +4,7 @@
 #include "raylib.h"
 #include "player.h"
 #include "enemy.h"
+#include "level1.h"
 #include <stdbool.h>
 
 typedef enum
@@ -39,6 +40,9 @@ typedef struct
 typedef struct
 {
     Texture2D background;
+    Texture2D openingCampus;
+    Texture2D openingPaper;
+    Texture2D redBoxLake;
     RenderTexture2D target;
 
     Rectangle backgroundSource;
@@ -54,6 +58,7 @@ typedef struct
     GameAudio audio;
     Camera2D camera;
     GameState state;
+    Level1 level1;
 
     float groundY;
     float resultTimer;
@@ -65,6 +70,7 @@ typedef struct
 
     bool showHitboxes;
     bool ambienceStarted;
+    bool levelIntroSoundPlayed;
     bool victorySoundPlayed;
     bool defeatSoundPlayed;
 } Game;

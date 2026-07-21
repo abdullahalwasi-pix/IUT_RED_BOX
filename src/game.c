@@ -384,7 +384,8 @@ static void UpdateCombat(Game *game, float dt)
         player->body,
         playerAboveEnemy,
         player->health > 0,
-        game->state == GAME_PLAYING,
+        game->state == GAME_PLAYING &&
+            Level1AllowsEnemyAI(&game->level1),
         dt,
         game->audio.enemyTelegraph,
         game->audio.enemyTelegraphReady
@@ -898,9 +899,10 @@ bool InitGame(Game *game)
 
     game->groundY = 530.0f;
     game->state = GAME_PLAYING;
+    InitLevel1(&game->level1);
 
     game->background = LoadTexture(
-        "../assets/backgrounds/main_gate.png"
+        "../assets/backgrounds/level1/main_gate.png"
     );
 
     if (!IsTextureValid(game->background))
@@ -910,6 +912,40 @@ bool InitGame(Game *game)
             "Background texture failed to load."
         );
 
+        return false;
+    }
+
+    game->openingCampus = LoadTexture(
+        "../assets/backgrounds/opening/campus_destroyed.png"
+    );
+
+    game->openingPaper = LoadTexture(
+        "../assets/backgrounds/opening/mission_paper_scene.png"
+    );
+
+    game->redBoxLake = LoadTexture(
+        "../assets/backgrounds/level7/red_box_lake.png"
+    );
+
+    if (!IsTextureValid(game->openingCampus))
+    {
+        TraceLog(
+            LOG_ERROR,
+            "Opening campus cinematic failed to load."
+        );
+
+        UnloadGame(game);
+        return false;
+    }
+
+    if (!IsTextureValid(game->openingPaper))
+    {
+        TraceLog(
+            LOG_ERROR,
+            "Mission paper cinematic failed to load."
+        );
+
+        UnloadGame(game);
         return false;
     }
 
@@ -1017,12 +1053,8 @@ bool InitGame(Game *game)
     game->camera = (Camera2D){0};
     game->camera.zoom = 1.0f;
 
-    if (game->audio.level1IntroReady)
-    {
-        PlaySound(
-            game->audio.level1Intro
-        );
-    }
+    game->ambienceStarted = false;
+    game->levelIntroSoundPlayed = false;
 
     return true;
 }
@@ -1033,6 +1065,8 @@ void RestartGame(Game *game)
     {
         return;
     }
+
+    ResetLevel1(&game->level1);
 
     ResetPlayer(
         &game->player,
@@ -1060,6 +1094,7 @@ void RestartGame(Game *game)
     game->impactFlashTimer = 0.0f;
     game->successfulHits = 0;
     game->ambienceStarted = false;
+    game->levelIntroSoundPlayed = false;
     game->victorySoundPlayed = false;
     game->defeatSoundPlayed = false;
     game->camera.offset = (Vector2){0.0f, 0.0f};
@@ -1076,10 +1111,6 @@ void RestartGame(Game *game)
         StopSound(
             game->audio.level1Intro
         );
-
-        PlaySound(
-            game->audio.level1Intro
-        );
     }
 }
 
@@ -1091,6 +1122,12 @@ void UpdateGame(Game *game)
     }
 
     float dt = GetFrameTime();
+
+    UpdateLevel1(
+        &game->level1,
+        dt,
+        game->enemy.deathFinished
+    );
 
     if (IsKeyPressed(KEY_F11))
     {
@@ -1109,7 +1146,10 @@ void UpdateGame(Game *game)
         return;
     }
 
-    if (game->audio.level1AmbienceReady)
+    if (
+        game->ambienceStarted &&
+        game->audio.level1AmbienceReady
+    )
     {
         UpdateMusicStream(
             game->audio.level1Ambience
@@ -1118,22 +1158,32 @@ void UpdateGame(Game *game)
 
     if (
         game->state == GAME_PLAYING &&
-        !game->ambienceStarted
+        game->level1.state == LEVEL1_AREA_INTRO &&
+        !game->levelIntroSoundPlayed
     )
     {
-        game->levelIntroTimer += dt;
-
-        if (
-            game->levelIntroTimer >= 1.35f &&
-            game->audio.level1AmbienceReady
-        )
+        if (game->audio.level1IntroReady)
         {
-            PlayMusicStream(
-                game->audio.level1Ambience
+            PlaySound(
+                game->audio.level1Intro
             );
-
-            game->ambienceStarted = true;
         }
+
+        game->levelIntroSoundPlayed = true;
+    }
+
+    if (
+        game->state == GAME_PLAYING &&
+        Level1ShowsGameplay(&game->level1) &&
+        !game->ambienceStarted &&
+        game->audio.level1AmbienceReady
+    )
+    {
+        PlayMusicStream(
+            game->audio.level1Ambience
+        );
+
+        game->ambienceStarted = true;
     }
 
     if (game->impactFlashTimer > 0.0f)
@@ -1145,7 +1195,8 @@ void UpdateGame(Game *game)
         &game->player,
         &game->playerAssets,
         dt,
-        game->state == GAME_PLAYING,
+        game->state == GAME_PLAYING &&
+            Level1AllowsPlayerControl(&game->level1),
         game->state == GAME_VICTORY,
         game->audio.swordSwing,
         game->audio.swordSwingReady
@@ -1206,18 +1257,24 @@ void DrawGame(Game *game)
         WHITE
     );
 
-    DrawPlayer(
-        &game->player,
-        game->showHitboxes
-    );
+    if (Level1ShowsGameplay(&game->level1))
+    {
+        DrawPlayer(
+            &game->player,
+            game->showHitboxes
+        );
 
-    DrawZombieEnemy(
-        &game->enemy,
-        &game->zombieAssets,
-        game->showHitboxes
-    );
+        DrawZombieEnemy(
+            &game->enemy,
+            &game->zombieAssets,
+            game->showHitboxes
+        );
+    }
 
-    if (IsKeyDown(KEY_F2))
+    if (
+        Level1ShowsGameplay(&game->level1) &&
+        IsKeyDown(KEY_F2)
+    )
     {
         DrawLine(
             0,
@@ -1241,7 +1298,18 @@ void DrawGame(Game *game)
         );
     }
 
-    DrawHud(game);
+    if (Level1ShowsHud(&game->level1))
+    {
+        DrawHud(game);
+    }
+
+    DrawLevel1Overlay(
+        &game->level1,
+        game->openingCampus,
+        game->openingPaper,
+        game->redBoxLake
+    );
+
     DrawResultPanel(game);
 
     EndTextureMode();
@@ -1328,6 +1396,28 @@ void UnloadGame(Game *game)
     {
         UnloadTexture(
             game->background
+        );
+    }
+
+
+    if (IsTextureValid(game->openingCampus))
+    {
+        UnloadTexture(
+            game->openingCampus
+        );
+    }
+
+    if (IsTextureValid(game->openingPaper))
+    {
+        UnloadTexture(
+            game->openingPaper
+        );
+    }
+
+    if (IsTextureValid(game->redBoxLake))
+    {
+        UnloadTexture(
+            game->redBoxLake
         );
     }
 
