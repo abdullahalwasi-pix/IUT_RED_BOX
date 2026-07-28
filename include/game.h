@@ -74,6 +74,7 @@ typedef struct
     bool levelIntroSoundPlayed;
     bool victorySoundPlayed;
     bool defeatSoundPlayed;
+    bool paused;
 } Game;
 
 bool InitGame(Game *game);

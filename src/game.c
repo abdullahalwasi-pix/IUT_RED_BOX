@@ -1143,6 +1143,7 @@ void RestartGame(Game *game)
     game->levelIntroSoundPlayed = false;
     game->victorySoundPlayed = false;
     game->defeatSoundPlayed = false;
+    game->paused = false;
     game->camera.offset = (Vector2){0.0f, 0.0f};
 
     if (game->audio.level1AmbienceReady)
@@ -1169,12 +1170,6 @@ void UpdateGame(Game *game)
 
     float dt = GetFrameTime();
 
-    UpdateLevel1(
-        &game->level1,
-        dt,
-        game->enemy.deathFinished
-    );
-
     if (IsKeyPressed(KEY_F11))
     {
         ToggleBorderlessWindowed();
@@ -1186,11 +1181,49 @@ void UpdateGame(Game *game)
             !game->showHitboxes;
     }
 
+    if (
+        game->state == GAME_PLAYING &&
+        IsKeyPressed(KEY_P)
+    )
+    {
+        game->paused = !game->paused;
+
+        if (
+            game->ambienceStarted &&
+            game->audio.level1AmbienceReady
+        )
+        {
+            if (game->paused)
+            {
+                PauseMusicStream(
+                    game->audio.level1Ambience
+                );
+            }
+            else
+            {
+                ResumeMusicStream(
+                    game->audio.level1Ambience
+                );
+            }
+        }
+    }
+
     if (IsKeyPressed(KEY_R))
     {
         RestartGame(game);
         return;
     }
+
+    if (game->paused)
+    {
+        return;
+    }
+
+    UpdateLevel1(
+        &game->level1,
+        dt,
+        game->enemy.deathFinished
+    );
 
     if (
         game->ambienceStarted &&
@@ -1305,6 +1338,61 @@ void UpdateGame(Game *game)
     }
 }
 
+static void DrawPauseOverlay(void)
+{
+    DrawRectangle(
+        0,
+        0,
+        SCREEN_WIDTH,
+        SCREEN_HEIGHT,
+        Fade(BLACK, 0.66f)
+    );
+
+    Rectangle panel = {
+        285.0f,
+        190.0f,
+        430.0f,
+        220.0f
+    };
+
+    DrawRectangleRounded(
+        panel,
+        0.07f,
+        12,
+        Fade(BLACK, 0.94f)
+    );
+
+    DrawRectangleLinesEx(
+        panel,
+        3.0f,
+        RED
+    );
+
+    DrawText(
+        "GAME PAUSED",
+        367,
+        225,
+        36,
+        RED
+    );
+
+    DrawText(
+        "Press P to resume",
+        398,
+        292,
+        22,
+        RAYWHITE
+    );
+
+    DrawText(
+        "Press R to restart Level 1",
+        360,
+        334,
+        19,
+        LIGHTGRAY
+    );
+}
+
 void DrawGame(Game *game)
 {
     if (game == 0)
@@ -1379,6 +1467,11 @@ void DrawGame(Game *game)
     );
 
     DrawResultPanel(game);
+
+    if (game->paused)
+    {
+        DrawPauseOverlay();
+    }
 
     EndTextureMode();
 
