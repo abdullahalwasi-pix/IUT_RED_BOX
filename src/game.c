@@ -509,6 +509,64 @@ static void UpdateCombat(Game *game, float dt)
     }
 }
 
+static void CompleteLevelOne(Game *game)
+{
+    if (
+        game == 0 ||
+        game->state != GAME_PLAYING ||
+        game->level1.state != LEVEL1_EXIT_READY
+    )
+    {
+        return;
+    }
+
+    float playerRightEdge =
+        game->player.x +
+        game->player.referenceDrawWidth;
+
+    if (
+        playerRightEdge <
+        (float)SCREEN_WIDTH - 8.0f
+    )
+    {
+        return;
+    }
+
+    game->level1.exitReached = true;
+    game->level1.state = LEVEL1_COMPLETE;
+    game->level1.stateTimer = 0.0f;
+
+    game->state = GAME_VICTORY;
+    game->resultTimer = 0.0f;
+
+    StartPlayerVictory(
+        &game->player
+    );
+
+    ForceZombieCorpse(
+        &game->enemy
+    );
+
+    if (game->audio.level1AmbienceReady)
+    {
+        StopMusicStream(
+            game->audio.level1Ambience
+        );
+    }
+
+    if (
+        !game->victorySoundPlayed &&
+        game->audio.victoryReady
+    )
+    {
+        PlaySound(
+            game->audio.victory
+        );
+
+        game->victorySoundPlayed = true;
+    }
+}
+
 static void UpdateGameResult(Game *game, float dt)
 {
     if (game->state == GAME_PLAYING)
@@ -557,11 +615,6 @@ static void UpdateGameResult(Game *game, float dt)
             game->player.health > 0
         )
         {
-            /*
-               Do not finish Level 1 immediately.
-               Keep the zombie corpse visible and allow
-               the Level 1 post-fight dialogue to play.
-            */
             ForceZombieCorpse(
                 &game->enemy
             );
@@ -777,47 +830,49 @@ static void DrawResultPanel(const Game *game)
         DrawText(
             "LEVEL 1 COMPLETE",
             330,
-            215,
+            207,
             34,
             LIME
         );
 
         DrawText(
-            "Zombie Student defeated - area secured",
-            320,
-            260,
-            21,
+            "IUT MAIN GATE SECURED",
+            359,
+            251,
+            22,
             RAYWHITE
         );
 
         DrawText(
-            TextFormat(
-                "Successful hits: %d",
-                game->successfulHits
-            ),
-            390,
-            305,
-            20,
+            "Zombie Student defeated",
+            380,
+            284,
+            19,
             LIGHTGRAY
         );
 
         DrawText(
-            TextFormat(
-                "Health remaining: %d",
-                game->player.health
-            ),
-            388,
-            335,
-            20,
+            "Story Clue 01 recovered",
+            385,
+            312,
+            19,
             LIGHTGRAY
         );
 
         DrawText(
-            "VICTORY",
-            435,
-            375,
-            26,
-            GOLD
+            "Next Area: CSE Building",
+            383,
+            342,
+            20,
+            ORANGE
+        );
+
+        DrawText(
+            "Campus Stability: 10% - Critical",
+            355,
+            374,
+            18,
+            RED
         );
     }
     else
@@ -861,7 +916,7 @@ static void DrawResultPanel(const Game *game)
     DrawText(
         "Press R to restart Level 1",
         365,
-        402,
+        409,
         18,
         GRAY
     );
@@ -1045,19 +1100,19 @@ void RestartGame(Game *game)
         return;
     }
 
-    /*
-       R restarts the playable part of Level 1.
-       The opening cinematic and area introduction are not replayed.
-    */
     ResetLevel1(&game->level1);
-    game->level1.state = LEVEL1_TUTORIAL;
+    game->level1.state = LEVEL1_COMBAT;
     game->level1.stateTimer = 0.0f;
-    game->level1.messageTimer = 0.0f;
-    game->level1.tutorialStep = 0;
-    game->level1.moved = false;
-    game->level1.jumped = false;
-    game->level1.attacked = false;
+    game->level1.messageTimer = 2.80f;
+    game->level1.tutorialStep = 3;
+    game->level1.moved = true;
+    game->level1.jumped = true;
+    game->level1.attacked = true;
     game->level1.enemyDefeated = false;
+    game->level1.dialogueIndex = 0;
+    game->level1.dialogueFinished = false;
+    game->level1.clueCollected = false;
+    game->level1.exitReached = false;
 
     ResetPlayer(
         &game->player,
@@ -1182,13 +1237,34 @@ void UpdateGame(Game *game)
         game->impactFlashTimer -= dt;
     }
 
+    /*
+       Stop unfinished combat actions after the Zombie dies.
+       The victory sheet is shown only during the short
+       ENEMY DEFEATED banner, then dialogue uses normal idle.
+    */
+    if (game->level1.state == LEVEL1_POST_FIGHT)
+    {
+        game->player.isAttacking = false;
+        game->player.isRunning = false;
+        game->player.isSprinting = false;
+        game->player.isJumping = false;
+        game->player.specialAttack = false;
+        game->player.attackActive = false;
+        game->player.attackImpactEvent = false;
+    }
+
+    bool showVictoryPose =
+        Level1ShowsBattleVictoryPose(
+            &game->level1
+        );
+
     UpdatePlayer(
         &game->player,
         &game->playerAssets,
         dt,
         game->state == GAME_PLAYING &&
             Level1AllowsPlayerControl(&game->level1),
-        game->state == GAME_VICTORY,
+        showVictoryPose,
         game->audio.swordSwing,
         game->audio.swordSwingReady
     );
@@ -1209,6 +1285,7 @@ void UpdateGame(Game *game)
     ResolvePlayerAgainstEnemy(game);
     UpdateCombat(game, dt);
     ResolveEnemyAgainstPlayer(game);
+    CompleteLevelOne(game);
     UpdateGameResult(game, dt);
 
     if (game->cameraShakeTimer > 0.0f)

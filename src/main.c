@@ -9,7 +9,7 @@ int main(void)
     InitWindow(
         SCREEN_WIDTH,
         SCREEN_HEIGHT,
-        "IUT Red Box - Level 1 Zomvsbie Student"
+        "IUT Red Box - Level 1 Zombie Student"
     );
 
     ToggleBorderlessWindowed();

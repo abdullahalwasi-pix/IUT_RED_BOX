@@ -2,6 +2,7 @@
 #define GAME_H
 
 #include "raylib.h"
+#include "config.h"
 #include "player.h"
 #include "enemy.h"
 #include "level1.h"

@@ -49,6 +49,7 @@ bool Level1AllowsPlayerControl(const Level1 *level);
 bool Level1AllowsEnemyAI(const Level1 *level);
 bool Level1ShowsGameplay(const Level1 *level);
 bool Level1ShowsHud(const Level1 *level);
+bool Level1ShowsBattleVictoryPose(const Level1 *level);
 
 void DrawLevel1Overlay(
     const Level1 *level,

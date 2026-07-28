@@ -3,13 +3,6 @@
 #include "raylib.h"
 #include <math.h>
 
-/*
-   OPENING SCENE ORDER
-   0 = Black title card
-   1 = Destroyed IUT aerial cinematic
-   2 = Mission paper briefing
-   3 = Final Red Box warning
-*/
 #define OPENING_SCENE_COUNT 4
 #define TITLE_SCENE_DURATION 6.20f
 #define CAMPUS_SCENE_DURATION 8.80f
@@ -17,8 +10,8 @@
 #define WARNING_SCENE_DURATION 7.00f
 #define AREA_INTRO_DURATION 4.80f
 #define FADE_DURATION 0.55f
+#define POST_FIGHT_BANNER_DURATION 2.80f
 
-/* Edit these strings whenever you want to change the story text. */
 static const char *MISSION_TITLE =
     "IUT EMERGENCY RECOVERY DIRECTIVE";
 
@@ -332,7 +325,6 @@ void UpdateLevel1(
                 level->openingTextIndex
             );
 
-        /* ENTER advances one scene. SPACE skips the full opening. */
         if (IsKeyPressed(KEY_SPACE))
         {
             StartAreaIntroduction(level);
@@ -365,12 +357,6 @@ void UpdateLevel1(
 
     if (level->state == LEVEL1_TUTORIAL)
     {
-        /*
-           Current game controls:
-           LEFT / RIGHT = move
-           UP           = jump
-           SPACE        = attack
-        */
 
         if (
             level->tutorialStep == 0 &&
@@ -441,25 +427,66 @@ void UpdateLevel1(
     if (level->state == LEVEL1_POST_FIGHT)
     {
         if (
-            !level->dialogueFinished &&
+            level->stateTimer >=
+                POST_FIGHT_BANNER_DURATION &&
             IsKeyPressed(KEY_ENTER)
         )
         {
-            level->dialogueIndex++;
-            level->stateTimer = 0.0f;
-
-            if (
-                level->dialogueIndex >=
-                POST_FIGHT_DIALOGUE_COUNT
-            )
+            if (!level->dialogueFinished)
             {
-                level->dialogueIndex =
-                    POST_FIGHT_DIALOGUE_COUNT - 1;
+                level->dialogueIndex++;
 
-                level->dialogueFinished = true;
+                if (
+                    level->dialogueIndex >=
+                    POST_FIGHT_DIALOGUE_COUNT
+                )
+                {
+                    level->dialogueIndex =
+                        POST_FIGHT_DIALOGUE_COUNT - 1;
+
+                    level->dialogueFinished = true;
+                }
+            }
+            else
+            {
+                level->state = LEVEL1_CLUE;
+                level->stateTimer = 0.0f;
             }
         }
 
+        return;
+    }
+
+    if (level->state == LEVEL1_CLUE)
+    {
+        if (IsKeyPressed(KEY_ENTER))
+        {
+            level->clueCollected = true;
+            level->state = LEVEL1_EXIT_READY;
+            level->stateTimer = 0.0f;
+            level->messageTimer = 3.20f;
+        }
+
+        return;
+    }
+
+    if (level->state == LEVEL1_EXIT_READY)
+    {
+        if (level->messageTimer > 0.0f)
+        {
+            level->messageTimer -= dt;
+
+            if (level->messageTimer < 0.0f)
+            {
+                level->messageTimer = 0.0f;
+            }
+        }
+
+        return;
+    }
+
+    if (level->state == LEVEL1_COMPLETE)
+    {
         return;
     }
 }
@@ -473,7 +500,6 @@ bool Level1AllowsPlayerControl(const Level1 *level)
 
     return level->state == LEVEL1_TUTORIAL ||
            level->state == LEVEL1_COMBAT ||
-           level->state == LEVEL1_CLUE ||
            level->state == LEVEL1_EXIT_READY;
 }
 
@@ -501,6 +527,18 @@ bool Level1ShowsGameplay(const Level1 *level)
 bool Level1ShowsHud(const Level1 *level)
 {
     return Level1ShowsGameplay(level);
+}
+
+bool Level1ShowsBattleVictoryPose(const Level1 *level)
+{
+    if (level == 0)
+    {
+        return false;
+    }
+
+    return level->state == LEVEL1_POST_FIGHT &&
+           level->stateTimer <
+               POST_FIGHT_BANNER_DURATION;
 }
 
 static void DrawTitleScene(
@@ -689,10 +727,6 @@ static void DrawTextCenteredInPaper(
 
 static void DrawMissionText(float alpha)
 {
-    /*
-       Tuned for the final blank scroll image.
-       All text stays inside the parchment safe area.
-    */
     const int paperLeft = 330;
     const int paperRight = 720;
     const int paperCenter = (paperLeft + paperRight) / 2;
@@ -779,12 +813,6 @@ static void DrawPaperScene(
         1.0f
     );
 
-    /*
-       Eye-opening reveal:
-       0.00s - 0.35s : almost fully black
-       0.35s - 1.55s : eyelids open smoothly
-       1.55s onward  : full paper scene visible
-    */
     const float revealStart = 0.35f;
     const float revealDuration = 1.20f;
     float revealProgress = SmoothStep01(
@@ -798,10 +826,6 @@ static void DrawPaperScene(
         Fade(WHITE, alpha)
     );
 
-    /*
-       Slight darkness while the professor's eyes adjust.
-       It fades away as the eyelids open.
-    */
     DrawRectangle(
         0,
         0,
@@ -813,10 +837,7 @@ static void DrawPaperScene(
         )
     );
 
-    /*
-       Two black masks simulate upper and lower eyelids.
-       The visible center gap grows smoothly.
-    */
+
     float halfGap =
         6.0f +
         revealProgress *
@@ -850,10 +871,6 @@ static void DrawPaperScene(
         );
     }
 
-    /*
-       Soft shadow near the eyelid edges.
-       This makes the reveal feel less mechanical.
-    */
     if (revealProgress < 1.0f)
     {
         const int edgeSoftness = 54;
@@ -877,10 +894,6 @@ static void DrawPaperScene(
         );
     }
 
-    /*
-       The mission writing is present from the beginning.
-       The eyelid masks reveal the paper and writing together.
-    */
     DrawMissionText(alpha);
 
     DrawLetterboxBars();
@@ -1104,10 +1117,111 @@ static void DrawCombatObjective(
     );
 }
 
+static void DrawEnemyDefeatedBanner(
+    const Level1 *level
+)
+{
+    float alpha = 1.0f;
+
+    const float fadeIn = 0.35f;
+    const float fadeOut = 0.55f;
+
+    if (level->stateTimer < fadeIn)
+    {
+        alpha =
+            level->stateTimer /
+            fadeIn;
+    }
+    else if (
+        level->stateTimer >
+        POST_FIGHT_BANNER_DURATION - fadeOut
+    )
+    {
+        alpha =
+            (
+                POST_FIGHT_BANNER_DURATION -
+                level->stateTimer
+            ) /
+            fadeOut;
+    }
+
+    alpha = ClampFloat(
+        alpha,
+        0.0f,
+        1.0f
+    );
+
+    DrawRectangle(
+        0,
+        0,
+        SCREEN_WIDTH,
+        SCREEN_HEIGHT,
+        Fade(BLACK, 0.24f * alpha)
+    );
+
+    Rectangle banner = {
+        190.0f,
+        220.0f,
+        620.0f,
+        132.0f
+    };
+
+    DrawRectangleRounded(
+        banner,
+        0.06f,
+        10,
+        Fade(BLACK, 0.90f * alpha)
+    );
+
+    DrawRectangleLinesEx(
+        banner,
+        3.0f,
+        Fade(RED, 0.92f * alpha)
+    );
+
+    DrawRectangle(
+        (int)banner.x,
+        (int)banner.y,
+        8,
+        (int)banner.height,
+        Fade(RED, alpha)
+    );
+
+    DrawCenteredText(
+        "ENEMY DEFEATED",
+        244,
+        36,
+        Fade(RED, alpha)
+    );
+
+    DrawCenteredText(
+        "Zombie Student neutralized",
+        292,
+        20,
+        Fade(RAYWHITE, alpha)
+    );
+
+    DrawCenteredText(
+        "Corruption signal remains active...",
+        322,
+        17,
+        Fade(ORANGE, alpha)
+    );
+}
+
 static void DrawPostFightDialogue(
     const Level1 *level
 )
 {
+    if (
+        level->stateTimer <
+        POST_FIGHT_BANNER_DURATION
+    )
+    {
+        DrawEnemyDefeatedBanner(level);
+        return;
+    }
+
     DrawRectangle(
         0,
         0,
@@ -1165,7 +1279,7 @@ static void DrawPostFightDialogue(
     if (level->dialogueFinished)
     {
         DrawText(
-            "Dialogue complete — Story Clue 01 will be recovered next.",
+            "Dialogue complete — press ENTER to inspect Story Clue 01.",
             (int)box.x + 28,
             (int)box.y + 94,
             17,
@@ -1182,6 +1296,225 @@ static void DrawPostFightDialogue(
             LIGHTGRAY
         );
     }
+}
+
+static void DrawStoryClue(
+    const Level1 *level
+)
+{
+    float alpha = SmoothStep01(
+        level->stateTimer / 0.45f
+    );
+
+    DrawRectangle(
+        0,
+        0,
+        SCREEN_WIDTH,
+        SCREEN_HEIGHT,
+        Fade(BLACK, 0.68f * alpha)
+    );
+
+    Rectangle card = {
+        165.0f,
+        128.0f,
+        670.0f,
+        350.0f
+    };
+
+    DrawRectangleRounded(
+        card,
+        0.045f,
+        12,
+        Fade((Color){10, 12, 18, 255}, 0.97f * alpha)
+    );
+
+    DrawRectangleLinesEx(
+        card,
+        3.0f,
+        Fade(RED, 0.92f * alpha)
+    );
+
+    DrawRectangle(
+        (int)card.x,
+        (int)card.y,
+        9,
+        (int)card.height,
+        Fade(RED, alpha)
+    );
+
+    DrawCenteredText(
+        "STORY CLUE 01",
+        166,
+        22,
+        Fade(RED, alpha)
+    );
+
+    DrawCenteredText(
+        "CENTRAL NETWORK",
+        208,
+        36,
+        Fade(RAYWHITE, alpha)
+    );
+
+    DrawRectangle(
+        SCREEN_WIDTH / 2 - 145,
+        260,
+        290,
+        3,
+        Fade(RED, 0.80f * alpha)
+    );
+
+    DrawCenteredText(
+        "The corrupted systems of every department",
+        302,
+        22,
+        Fade(LIGHTGRAY, alpha)
+    );
+
+    DrawCenteredText(
+        "are connected to one central network.",
+        336,
+        22,
+        Fade(LIGHTGRAY, alpha)
+    );
+
+    DrawCenteredText(
+        "The signal continues toward the CSE Building.",
+        390,
+        19,
+        Fade(ORANGE, alpha)
+    );
+
+    DrawCenteredText(
+        "Press ENTER to recover Story Clue 01",
+        438,
+        17,
+        Fade(RAYWHITE, alpha)
+    );
+}
+
+static void DrawExitObjective(
+    const Level1 *level
+)
+{
+    float alpha = 1.0f;
+
+    if (level->messageTimer > 0.0f)
+    {
+        alpha = ClampFloat(
+            level->messageTimer / 0.50f,
+            0.0f,
+            1.0f
+        );
+    }
+
+    Rectangle panel = {
+        235.0f,
+        124.0f,
+        530.0f,
+        96.0f
+    };
+
+    DrawRectangleRounded(
+        panel,
+        0.055f,
+        10,
+        Fade(BLACK, 0.86f * alpha)
+    );
+
+    DrawRectangleLinesEx(
+        panel,
+        2.0f,
+        Fade(RED, 0.90f * alpha)
+    );
+
+    DrawCenteredText(
+        "NEXT DESTINATION: CSE BUILDING",
+        145,
+        22,
+        Fade(RED, alpha)
+    );
+
+    DrawCenteredText(
+        "Follow the corrupted signal — move to the right-side exit.",
+        181,
+        18,
+        Fade(RAYWHITE, alpha)
+    );
+
+    DrawText(
+        "EXIT  >>>",
+        SCREEN_WIDTH - 152,
+        475,
+        24,
+        Fade(ORANGE, 0.92f)
+    );
+}
+
+static void DrawLevelCompleteTransition(
+    const Level1 *level
+)
+{
+    float alpha = 1.0f;
+
+    if (level->stateTimer < 0.45f)
+    {
+        alpha = SmoothStep01(
+            level->stateTimer / 0.45f
+        );
+    }
+    else if (level->stateTimer > 2.45f)
+    {
+        alpha = SmoothStep01(
+            (3.00f - level->stateTimer) / 0.55f
+        );
+    }
+
+    alpha = ClampFloat(alpha, 0.0f, 1.0f);
+
+    DrawRectangle(
+        0,
+        0,
+        SCREEN_WIDTH,
+        SCREEN_HEIGHT,
+        Fade(BLACK, 0.56f * alpha)
+    );
+
+    DrawCenteredText(
+        "IUT MAIN GATE SECURED",
+        220,
+        39,
+        Fade(LIME, alpha)
+    );
+
+    DrawRectangle(
+        SCREEN_WIDTH / 2 - 150,
+        278,
+        300,
+        3,
+        Fade(LIME, 0.82f * alpha)
+    );
+
+    DrawCenteredText(
+        "Story Clue 01 recovered",
+        310,
+        23,
+        Fade(RAYWHITE, alpha)
+    );
+
+    DrawCenteredText(
+        "Next Area: CSE Building",
+        350,
+        21,
+        Fade(ORANGE, alpha)
+    );
+
+    DrawCenteredText(
+        "Campus Stability: 10% - Critical",
+        390,
+        18,
+        Fade(LIGHTGRAY, alpha)
+    );
 }
 
 void DrawLevel1Overlay(
@@ -1214,6 +1547,24 @@ void DrawLevel1Overlay(
         return;
     }
 
+    if (level->state == LEVEL1_CLUE)
+    {
+        DrawStoryClue(level);
+        return;
+    }
+
+    if (level->state == LEVEL1_EXIT_READY)
+    {
+        DrawExitObjective(level);
+        return;
+    }
+
+    if (level->state == LEVEL1_COMPLETE)
+    {
+        DrawLevelCompleteTransition(level);
+        return;
+    }
+
     if (level->state == LEVEL1_OPENING)
     {
         float duration =
@@ -1226,11 +1577,6 @@ void DrawLevel1Overlay(
             duration
         );
 
-        /*
-           Keep the opening fully opaque.
-           Without this black base, the gameplay Main Gate background
-           becomes visible for a moment while a scene alpha is near zero.
-        */
         DrawRectangle(
             0,
             0,
