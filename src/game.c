@@ -880,46 +880,57 @@ static void DrawResultPanel(const Game *game)
         DrawText(
             "MISSION FAILED",
             357,
-            215,
+            207,
             34,
             RED
         );
 
         DrawText(
-            "The Zombie Student defeated the player",
-            317,
-            260,
-            21,
+            "PROFESSOR REAZ HAS FALLEN",
+            347,
+            255,
+            22,
             RAYWHITE
         );
 
         DrawText(
-            TextFormat(
-                "Enemy health remaining: %d",
-                game->enemy.health
-            ),
-            365,
-            310,
-            20,
+            "The corruption still controls the Main Gate.",
+            318,
+            291,
+            19,
             LIGHTGRAY
         );
 
         DrawText(
-            "ENEMY WINS",
-            408,
-            355,
-            27,
+            TextFormat(
+                "Zombie health remaining: %d",
+                game->enemy.health
+            ),
+            371,
+            326,
+            19,
             ORANGE
+        );
+
+        DrawText(
+            "PRESS ENTER TO RETRY",
+            374,
+            374,
+            22,
+            RED
         );
     }
 
-    DrawText(
-        "Press R to restart Level 1",
-        365,
-        409,
-        18,
-        GRAY
-    );
+    if (game->state == GAME_VICTORY)
+    {
+        DrawText(
+            "Press R to restart Level 1",
+            365,
+            409,
+            18,
+            GRAY
+        );
+    }
 }
 
 bool InitGame(Game *game)
@@ -1214,6 +1225,16 @@ void UpdateGame(Game *game)
         return;
     }
 
+    if (
+        game->state == GAME_DEFEAT &&
+        game->resultTimer >= RESULT_PANEL_DELAY &&
+        IsKeyPressed(KEY_ENTER)
+    )
+    {
+        RestartGame(game);
+        return;
+    }
+
     if (game->paused)
     {
         return;
@@ -1270,11 +1291,6 @@ void UpdateGame(Game *game)
         game->impactFlashTimer -= dt;
     }
 
-    /*
-       Stop unfinished combat actions after the Zombie dies.
-       The victory sheet is shown only during the short
-       ENEMY DEFEATED banner, then dialogue uses normal idle.
-    */
     if (game->level1.state == LEVEL1_POST_FIGHT)
     {
         game->player.isAttacking = false;
